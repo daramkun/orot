@@ -69,22 +69,16 @@ size_t estimate_fixed_bits(const BlockStats& stats) {
     return bits;
 }
 
-size_t estimate_dynamic_bits(const BlockStats& stats) {
-    /* Build optimal Huffman lengths */
-    uint8_t litlen_lens[LITLEN_SYMS] = {};
-    uint8_t dist_lens  [DIST_SYMS]   = {};
-    build_huffman_lengths(stats.lit_freq,  LITLEN_SYMS, litlen_lens, MAX_CODE_BITS);
-    build_huffman_lengths(stats.dist_freq, DIST_SYMS,   dist_lens,   MAX_CODE_BITS);
-
+/* Internal: estimate dynamic block size from pre-built Huffman lengths.
+ * Avoids an extra build_huffman_lengths call when lengths are already known. */
+static size_t estimate_dynamic_bits_from_lens(
+    const BlockStats& stats,
+    const uint8_t* litlen_lens,
+    const uint8_t* dist_lens)
+{
     size_t bits = 3 + 5 + 5 + 4;  /* BFINAL/BTYPE + HLIT + HDIST + HCLEN */
     bits += 19 * 3;  /* code-length lengths (rough estimate) */
-
-    /* Estimate the cost of encoding the litlen + dist code-length tables.
-     * Each entry in the code-length sequence costs at least ~3 bits on average
-     * (either a direct cl code or part of a RLE run).  This estimate is
-     * intentionally conservative so that dynamic Huffman is never chosen
-     * when the actual output would exceed the stored-block bound. */
-    bits += 3 * (LITLEN_SYMS + DIST_SYMS);
+    bits += 3 * (LITLEN_SYMS + DIST_SYMS);  /* conservative RLE estimate */
 
     for (int i = 0; i < LITLEN_SYMS; ++i)
         bits += static_cast<size_t>(litlen_lens[i]) * stats.lit_freq[i];
@@ -95,6 +89,15 @@ size_t estimate_dynamic_bits(const BlockStats& stats) {
     for (int i = 0; i < 30; ++i)
         bits += static_cast<size_t>(DIST_EXTRA_BITS[i]) * stats.dist_freq[i];
     return bits;
+}
+
+size_t estimate_dynamic_bits(const BlockStats& stats) {
+    /* Build optimal Huffman lengths, then delegate to prebuilt variant */
+    uint8_t litlen_lens[LITLEN_SYMS] = {};
+    uint8_t dist_lens  [DIST_SYMS]   = {};
+    build_huffman_lengths(stats.lit_freq,  LITLEN_SYMS, litlen_lens, MAX_CODE_BITS);
+    build_huffman_lengths(stats.dist_freq, DIST_SYMS,   dist_lens,   MAX_CODE_BITS);
+    return estimate_dynamic_bits_from_lens(stats, litlen_lens, dist_lens);
 }
 
 /* =========================================================================
@@ -338,6 +341,48 @@ void emit_dynamic_block(
 }
 
 /* =========================================================================
+ * Internal: emit dynamic block from pre-built Huffman lengths
+ * ========================================================================= */
+
+static void emit_dynamic_block_prebuilt(
+    const Token*   tokens, size_t n_tokens,
+    const uint8_t* litlen_lens, const uint8_t* dist_lens,
+    BitWriter& bw, bool is_last)
+{
+    bw.write_bit(is_last ? 1 : 0);
+    bw.write_bits(2, 2);  /* BTYPE = 10 = dynamic Huffman */
+
+    /* Ensure EOB (256) has a valid code */
+    uint8_t ll[LITLEN_SYMS];
+    uint8_t dl[DIST_SYMS];
+    std::memcpy(ll, litlen_lens, LITLEN_SYMS);
+    std::memcpy(dl, dist_lens,   DIST_SYMS);
+    if (ll[256] == 0) ll[256] = 1;
+    bool has_dist = false;
+    for (int i = 0; i < DIST_SYMS; ++i) if (dl[i] > 0) { has_dist = true; break; }
+    if (!has_dist) dl[0] = 1;
+
+    int hlit  = LITLEN_SYMS;
+    while (hlit  > 257 && ll[hlit  - 1] == 0) --hlit;
+    int hdist = DIST_SYMS;
+    while (hdist > 1   && dl[hdist - 1] == 0) --hdist;
+
+    encode_code_lengths(ll, hlit, dl, hdist, bw);
+
+    HuffEncTable  litlen_enc;
+    HuffDistTable dist_enc;
+    std::memcpy(litlen_enc.lens, ll, LITLEN_SYMS);
+    std::memcpy(dist_enc.lens,   dl, DIST_SYMS);
+    build_enc_table_from_lens(ll, LITLEN_SYMS, litlen_enc.codes);
+    build_enc_table_from_lens(dl, DIST_SYMS,   dist_enc.codes);
+
+    for (size_t i = 0; i < n_tokens; ++i)
+        emit_litlen_token(tokens[i], litlen_enc, dist_enc, bw);
+
+    emit_sym(bw, litlen_enc.codes[256], litlen_enc.lens[256]);
+}
+
+/* =========================================================================
  * Top-level encode_block: automatic block type selection
  * ========================================================================= */
 
@@ -353,6 +398,11 @@ size_t encode_block(
     const size_t start = bw.bytes_written();
 
     BlockType type;
+
+    /* Pre-built dynamic Huffman lengths (populated lazily for Auto/Dynamic) */
+    uint8_t dyn_litlen_lens[LITLEN_SYMS] = {};
+    uint8_t dyn_dist_lens  [DIST_SYMS]   = {};
+    bool    dyn_lens_built = false;
 
     if (hint == BlockTypeHint::Stored) {
         type = BlockType::Stored;
@@ -370,12 +420,21 @@ size_t encode_block(
             const size_t fixed_bits = estimate_fixed_bits(stats);
             type = (stored_bits <= fixed_bits) ? BlockType::Stored : BlockType::Fixed;
         } else if (hint == BlockTypeHint::Dynamic) {
-            const size_t dynamic_bits = estimate_dynamic_bits(stats);
+            /* Build lengths once for estimate; reuse in emit */
+            build_huffman_lengths(stats.lit_freq,  LITLEN_SYMS, dyn_litlen_lens, MAX_CODE_BITS);
+            build_huffman_lengths(stats.dist_freq, DIST_SYMS,   dyn_dist_lens,   MAX_CODE_BITS);
+            dyn_lens_built = true;
+            const size_t dynamic_bits = estimate_dynamic_bits_from_lens(
+                stats, dyn_litlen_lens, dyn_dist_lens);
             type = (stored_bits <= dynamic_bits) ? BlockType::Stored : BlockType::Dynamic;
         } else {
-            /* Auto: compare all three */
-            const size_t fixed_bits   = estimate_fixed_bits(stats);
-            const size_t dynamic_bits = estimate_dynamic_bits(stats);
+            /* Auto: compare all three — build dynamic lengths once */
+            const size_t fixed_bits = estimate_fixed_bits(stats);
+            build_huffman_lengths(stats.lit_freq,  LITLEN_SYMS, dyn_litlen_lens, MAX_CODE_BITS);
+            build_huffman_lengths(stats.dist_freq, DIST_SYMS,   dyn_dist_lens,   MAX_CODE_BITS);
+            dyn_lens_built = true;
+            const size_t dynamic_bits = estimate_dynamic_bits_from_lens(
+                stats, dyn_litlen_lens, dyn_dist_lens);
 
             if (stored_bits <= fixed_bits && stored_bits <= dynamic_bits)
                 type = BlockType::Stored;
@@ -393,12 +452,18 @@ size_t encode_block(
     case BlockType::Fixed:
         emit_fixed_block(tokens, n_tokens, bw, is_last);
         break;
-    case BlockType::Dynamic: {
-        BlockStats stats{};
-        compute_block_stats(tokens, n_tokens, stats);
-        emit_dynamic_block(tokens, n_tokens, stats, bw, is_last);
+    case BlockType::Dynamic:
+        if (dyn_lens_built) {
+            /* Reuse pre-built lengths — avoids redundant build_huffman_lengths calls */
+            emit_dynamic_block_prebuilt(
+                tokens, n_tokens, dyn_litlen_lens, dyn_dist_lens, bw, is_last);
+        } else {
+            /* hint == Dynamic but lens not built (shouldn't happen, but safe fallback) */
+            BlockStats stats{};
+            compute_block_stats(tokens, n_tokens, stats);
+            emit_dynamic_block(tokens, n_tokens, stats, bw, is_last);
+        }
         break;
-    }
     }
 
     /* Only byte-align at the end of the final block.  For non-last blocks in

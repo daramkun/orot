@@ -35,7 +35,7 @@ struct HuffDistTable {
  *
  * Secondary table: entries for codes longer than DECODE_TABLE_BITS bits.
  */
-static constexpr int LITLEN_DECODE_BITS = 11;
+static constexpr int LITLEN_DECODE_BITS = 11;  /* 8KB primary table: L1-cache hot on all targets */
 static constexpr int DIST_DECODE_BITS   = 8;
 
 static constexpr uint32_t HUFF_SUBTABLE_FLAG = (1U << 24);

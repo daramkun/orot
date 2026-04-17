@@ -20,6 +20,9 @@
 | 교차 호환성 테스트 (압축/해제 라이브러리 교환) | ✅ |
 | 스트리밍 ZLIB/GZIP 포맷 지원 | ✅ |
 | LZ77 압축 속도 최적화 (L1 fast path + hash_bits) | ✅ |
+| 압축해제 copy_match 최적화 (doubling memcpy) | ✅ |
+| inflate_fast safe zone literal bounds check 제거 | ✅ |
+| encode_block estimate 중복 제거 (build_huffman_lengths 2→1회) | ✅ |
 
 ---
 
@@ -71,6 +74,8 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 
 ## 비교 벤치마크 결과 (Apple M-series, 50 iters, ZLIB 포맷)
 
+### 최적화 전
+
 | 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
 |-----------|---------|------|-----------|-------------|--------|
 | ours | text (~90KB) | fast | 79.1 | 87.6 | 2.1% |
@@ -86,8 +91,33 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 | zlib | random (1MB) | fast | 38.8 | 8199.2 | 100.0% |
 | libdeflate | random (1MB) | fast | 96.4 | 18305.2 | 100.0% |
 
+### 최적화 후 (copy_match + inflate_fast safe zone + estimate 중복 제거)
+
+| 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
+|-----------|---------|------|-----------|-------------|--------|
+| ours | text (~90KB) | fast | 167.4 | 87.8 | 2.1% |
+| zlib | text (~90KB) | fast | 928.2 | 5031.1 | 0.7% |
+| libdeflate | text (~90KB) | fast | 901.5 | 3791.0 | 0.4% |
+| ours | text (~90KB) | default | 43.4 | 83.7 | 0.9% |
+| zlib | text (~90KB) | default | 350.9 | 2923.7 | 0.4% |
+| libdeflate | text (~90KB) | default | 628.6 | 4199.2 | 0.4% |
+| ours | zeros (1MB) | fast | 69.5 | 95.7 | 1.0% |
+| zlib | zeros (1MB) | fast | 627.4 | 5970.6 | 0.4% |
+| libdeflate | zeros (1MB) | fast | 947.0 | 8060.5 | 0.1% |
+| ours | random (1MB) | fast | 28.1 | 125.5 | 100.0% |
+| zlib | random (1MB) | fast | 38.5 | 8086.7 | 100.0% |
+| libdeflate | random (1MB) | fast | 95.7 | 17676.7 | 100.0% |
+
+#### 압축 개선 요약
+
+| 데이터셋 | 이전 | 이후 | 개선 |
+|---------|------|------|------|
+| text fast | 79.1 MB/s | 167.4 MB/s | +112% |
+| zeros fast | 50.0 MB/s | 69.5 MB/s | +39% |
+| random fast | 10.3 MB/s | 28.1 MB/s | +173% |
+
 > 압축률%: compressed/original×100 (낮을수록 좋음). 랜덤 데이터는 압축 불가(100%).  
-> ours 압축해제 속도는 raw Decompressor 경로 미최적화로 느림.
+> ours 압축해제 속도는 raw Decompressor 경로 미최적화로 여전히 느림.
 
 ---
 
