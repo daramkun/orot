@@ -1,0 +1,43 @@
+include(CheckCXXCompilerFlag)
+
+# x86 SIMD detection
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i686|i386")
+    check_cxx_compiler_flag("-msse2"   DEFLATE_COMPILER_HAS_SSE2)
+    check_cxx_compiler_flag("-msse4.2" DEFLATE_COMPILER_HAS_SSE42)
+    check_cxx_compiler_flag("-mavx2"   DEFLATE_COMPILER_HAS_AVX2)
+
+    if(DEFLATE_COMPILER_HAS_SSE2)
+        set(DEFLATE_HAS_SSE2 TRUE)
+        message(STATUS "Deflate: SSE2 enabled")
+    endif()
+    if(DEFLATE_COMPILER_HAS_SSE42)
+        set(DEFLATE_HAS_SSE42 TRUE)
+        message(STATUS "Deflate: SSE4.2 enabled")
+    endif()
+    if(DEFLATE_COMPILER_HAS_AVX2)
+        set(DEFLATE_HAS_AVX2 TRUE)
+        message(STATUS "Deflate: AVX2 enabled")
+    endif()
+endif()
+
+# ARM SIMD detection
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64|armv8")
+    check_cxx_compiler_flag("-march=armv8-a+simd" DEFLATE_COMPILER_HAS_NEON)
+    check_cxx_compiler_flag("-march=armv8-a+crc"  DEFLATE_COMPILER_HAS_CRC_ARM)
+
+    if(DEFLATE_COMPILER_HAS_NEON)
+        set(DEFLATE_HAS_NEON TRUE)
+        message(STATUS "Deflate: ARM NEON enabled")
+    endif()
+    if(DEFLATE_COMPILER_HAS_CRC_ARM)
+        set(DEFLATE_HAS_CRC_ARM TRUE)
+        message(STATUS "Deflate: ARM CRC32 enabled")
+    endif()
+endif()
+
+# Apple Silicon (arm64 via Rosetta detection or native)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    set(DEFLATE_HAS_NEON TRUE)
+    set(DEFLATE_HAS_CRC_ARM TRUE)
+    message(STATUS "Deflate: Apple Silicon NEON+CRC32 enabled")
+endif()

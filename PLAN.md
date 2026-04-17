@@ -1,0 +1,136 @@
+# DEFLATE 라이브러리 구현 계획
+
+## 완료 현황
+
+| 작업 | 상태 |
+|------|------|
+| CMake + 타입 + 아레나 + BitWriter/Reader | ✅ |
+| 스칼라 허프만 (Package-Merge) + LZ77 (레벨 0-12) | ✅ |
+| DEFLATE 블록 타입 선택 (stored/fixed/dynamic) | ✅ |
+| 스트리밍 압축기 (Compressor) | ✅ |
+| 스트리밍 압축해제기 (Decompressor, 상태머신) | ✅ |
+| zlib/gzip 래퍼 (whole-buffer) | ✅ |
+| ARM NEON + CRC32 SIMD | ✅ |
+| 병렬 압축기 (pigz 방식) | ✅ |
+| C API + C++ RAII API | ✅ |
+| 단위 테스트 7/7 통과 | ✅ |
+| Fuzz 테스트 (버그 3개 수정) | ✅ |
+| 단일 라이브러리 벤치마크 | ✅ |
+| 비교 벤치마크 (ours vs zlib vs libdeflate) | ✅ |
+| 교차 호환성 테스트 (압축/해제 라이브러리 교환) | ✅ |
+| 스트리밍 ZLIB/GZIP 포맷 지원 | ✅ |
+
+---
+
+## 발견 및 수정된 버그
+
+1. **`decompressor.cpp`: distance code OOB** — `di >= 30` 시 `DIST_EXTRA_BITS[di]` 배열 초과.
+   → `di >= 30` 검사 후 `DEFLATE_DATA_ERROR` 반환.
+
+2. **`lz77.cpp`: `lz77_hash4` 4-byte OOB** — 입력 끝 3바이트 미만에서 4바이트 읽기.
+   → `pos + 4 > src_len` 시 hash 삽입/검색 건너뜀. `lz77_insert_dict`도 동일.
+
+3. **`deflate_block.cpp`: `estimate_dynamic_bits` 과소평가** — code-length 테이블 RLE 비용 무시
+   → 작은 입력에서 dynamic Huffman 잘못 선택 → `deflate_compress_bound` 초과.
+   → `3 * (LITLEN_SYMS + DIST_SYMS)` bits 추가.
+
+---
+
+## 벤치마크 결과 (스칼라 + ARM NEON, Apple M-series)
+
+| 데이터셋 | 레벨 | 포맷 | 압축 MB/s | 압축해제 MB/s |
+|---------|------|------|-----------|------------|
+| 텍스트 (~90KB) | 1 | raw | 115 | 119 |
+| 텍스트 (~90KB) | 6 | raw | 54 | 122 |
+| zeros (1MB) | 1 | raw | 59 | 122 |
+| 랜덤 (1MB) | 1 | raw | 10 | 209 |
+| 랜덤 (1MB) | 6 | raw | 1.4 | 190 |
+
+---
+
+## 비교 벤치마크 결과 (Apple M-series, 50 iters, ZLIB 포맷)
+
+| 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
+|-----------|---------|------|-----------|-------------|--------|
+| ours | text (~90KB) | fast | 79.1 | 87.6 | 2.1% |
+| zlib | text (~90KB) | fast | 962.0 | 4503.2 | 0.7% |
+| libdeflate | text (~90KB) | fast | 872.0 | 3478.4 | 0.4% |
+| ours | text (~90KB) | default | 44.8 | 88.5 | 0.9% |
+| zlib | text (~90KB) | default | 362.0 | 3227.3 | 0.4% |
+| libdeflate | text (~90KB) | default | 622.2 | 3985.2 | 0.4% |
+| ours | zeros (1MB) | fast | 50.0 | 93.7 | 0.6% |
+| zlib | zeros (1MB) | fast | 624.3 | 6321.3 | 0.4% |
+| libdeflate | zeros (1MB) | fast | 977.1 | 7691.6 | 0.1% |
+| ours | random (1MB) | fast | 10.3 | 124.8 | 100.0% |
+| zlib | random (1MB) | fast | 38.8 | 8199.2 | 100.0% |
+| libdeflate | random (1MB) | fast | 96.4 | 18305.2 | 100.0% |
+
+> 압축률%: compressed/original×100 (낮을수록 좋음). 랜덤 데이터는 압축 불가(100%).  
+> ours 압축해제 속도는 raw Decompressor 경로 미최적화로 느림.
+
+---
+
+## 교차 호환성 결과
+
+126/126 PASS (ZLIB×54 + GZIP×54 + RAW×18, 3개 라이브러리 × 6조합 × 3레벨 × 3데이터셋)
+
+---
+
+## 작업 1: 비교 벤치마크
+
+**파일**: `tests/bench/bench_compare.cpp`  
+**빌드 옵션**: `-DDEFLATE_COMPARE_BENCH=ON` (zlib + libdeflate 필요)
+
+### 측정 지표
+- 압축/압축해제 처리량 (MB/s)
+- 압축률 (%)
+- CPU 시간 (`CLOCK_PROCESS_CPUTIME_ID`)
+- 메모리 RSS delta (`getrusage`)
+
+### 비교 라이브러리
+| 라이브러리 | 버전 | 레벨 매핑 |
+|-----------|------|---------|
+| ours | — | 1 / 6 / 9 |
+| zlib | 내장 | 1 / 6 / 9 |
+| libdeflate | 1.25 (Homebrew) | 1 / 6 / 9 |
+
+---
+
+## 작업 2: 교차 호환성 테스트
+
+**파일**: `tests/compat/test_compat.cpp`  
+**빌드 옵션**: `-DDEFLATE_COMPAT_TEST=ON` (zlib + libdeflate 필요)
+
+### 테스트 매트릭스
+압축 × 압축해제 × 포맷(ZLIB, GZIP) 전체 조합.
+
+---
+
+## 작업 3: 스트리밍 ZLIB/GZIP 포맷
+
+**파일**: `src/api/stream_api.cpp` — 완료
+
+Phase 상태머신 (HEADER→DATA→TRAILER→DONE) 구현:
+- 압축: 포맷 헤더 출력 → raw 압축 + checksum 누적 → 트레일러 출력
+- 압축해제: 헤더 파싱/검증 → raw 압축해제 + checksum 누적 → 트레일러 검증
+- ZLIB: adler32 (big-endian 4B trailer)
+- GZIP: crc32 + isize (little-endian 8B trailer), 가변길이 헤더 파싱 포함
+
+---
+
+## 검증 명령어
+
+```bash
+# 단위 테스트
+ctest --test-dir build --output-on-failure
+
+# 비교 벤치마크
+cmake -B build -DDEFLATE_TESTS=ON -DDEFLATE_COMPARE_BENCH=ON
+cmake --build build -j
+./build/tests/bench_compare
+
+# 호환성 테스트
+cmake -B build -DDEFLATE_TESTS=ON -DDEFLATE_COMPAT_TEST=ON
+cmake --build build -j
+./build/tests/test_compat
+```

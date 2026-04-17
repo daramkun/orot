@@ -1,0 +1,90 @@
+#include "../simd_dispatch.hpp"
+
+#if defined(DEFLATE_HAS_SSE42)
+
+#include <nmmintrin.h>  /* SSE4.2 */
+#include <cstring>
+
+namespace deflate {
+
+/*
+ * SSE4.2 match length using PCMPISTRM / compare 16 bytes at once.
+ * We use a simple 16-byte-at-a-time loop with _mm_cmpeq_epi8 + movemask.
+ */
+int sse42_match_length(const uint8_t* a, const uint8_t* b, int max_len) {
+    int len = 0;
+
+    /* 16-byte chunks via SSE4.2 */
+    while (len + 16 <= max_len) {
+        __m128i va = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + len));
+        __m128i vb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + len));
+        int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(va, vb));
+        if (mask == 0xFFFF) {
+            len += 16;
+            continue;
+        }
+        /* Find first mismatch bit */
+#if defined(__GNUC__) || defined(__clang__)
+        return len + __builtin_ctz(~mask);
+#else
+        int mismatch = 0;
+        while ((mask >> mismatch) & 1) ++mismatch;
+        return len + mismatch;
+#endif
+    }
+
+    /* 8-byte chunk */
+    if (len + 8 <= max_len) {
+        __m128i va = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(a + len));
+        __m128i vb = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(b + len));
+        int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(va, vb)) & 0xFF;
+        if (mask == 0xFF) {
+            len += 8;
+        } else {
+#if defined(__GNUC__) || defined(__clang__)
+            return len + __builtin_ctz(~mask);
+#else
+            int m = 0;
+            while ((mask >> m) & 1) ++m;
+            return len + m;
+#endif
+        }
+    }
+
+    /* Scalar tail */
+    while (len < max_len && a[len] == b[len]) ++len;
+    return len;
+}
+
+/*
+ * SSE4.2 hardware CRC-32 using _mm_crc32_u64.
+ */
+uint32_t sse42_crc32(uint32_t crc, const uint8_t* data, size_t len) {
+    crc = ~crc;
+
+    /* 8-byte chunks */
+    while (len >= 8) {
+        uint64_t v;
+        std::memcpy(&v, data, 8);
+        crc  = static_cast<uint32_t>(_mm_crc32_u64(crc, v));
+        data += 8;
+        len  -= 8;
+    }
+
+    if (len >= 4) {
+        uint32_t v;
+        std::memcpy(&v, data, 4);
+        crc  = _mm_crc32_u32(crc, v);
+        data += 4;
+        len  -= 4;
+    }
+
+    while (len-- > 0)
+        crc = _mm_crc32_u8(crc, *data++);
+
+    return ~crc;
+}
+
+} /* namespace deflate */
+
+#endif /* DEFLATE_HAS_SSE42 */
