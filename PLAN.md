@@ -19,6 +19,7 @@
 | 비교 벤치마크 (ours vs zlib vs libdeflate) | ✅ |
 | 교차 호환성 테스트 (압축/해제 라이브러리 교환) | ✅ |
 | 스트리밍 ZLIB/GZIP 포맷 지원 | ✅ |
+| LZ77 압축 속도 최적화 (L1 fast path + hash_bits) | ✅ |
 
 ---
 
@@ -45,6 +46,26 @@
 | zeros (1MB) | 1 | raw | 59 | 122 |
 | 랜덤 (1MB) | 1 | raw | 10 | 209 |
 | 랜덤 (1MB) | 6 | raw | 1.4 | 190 |
+
+---
+
+## LZ77 압축 속도 최적화 (L1 fast path)
+
+**변경 내용** (`src/core/lz77.cpp`, `src/core/lz77.hpp`):
+- L1-L3: `match_find_fast()` — head[] 단일 조회만, chain traversal 없음, prev[] 업데이트 생략
+- L1-L3: match 후 covered positions hash insert loop 생략
+- 런타임 hash_bits: L1=12bit(4KB), L2-L3=14bit(32KB), L4+=16bit(128KB)
+- 단위 테스트 7/7, 교차 호환성 126/126 회귀 없음
+
+| 데이터셋 | 이전 L1 | 이후 L1 | 개선 |
+|---------|--------|--------|------|
+| text (~90KB) | 79 MB/s | 176 MB/s | +2.2x |
+| zeros (1MB) | 50 MB/s | 75 MB/s | +1.5x |
+| random (1MB) | 10 MB/s | 28 MB/s | +2.8x |
+| code (~512KB) | 33 MB/s | 50 MB/s | +1.5x |
+
+L6 속도 변화 없음 (±2% 노이즈 범위).  
+Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제거.
 
 ---
 

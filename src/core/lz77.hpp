@@ -49,6 +49,8 @@ struct LZ77Config {
     int  nice_len;       /* stop searching if match >= this length */
     int  lazy_depth;     /* lazy match lookahead depth (0 = greedy) */
     bool bt4;            /* use binary-tree match finder (level 10+) */
+    bool fast_path;      /* L1-L3: head-only lookup, skip prev[], skip covered-pos hashing */
+    int  hash_bits;      /* runtime hash table bits: 12 (L1), 14 (L2-3), 16 (L4+) */
 };
 
 LZ77Config lz77_config_for_level(int level);
@@ -68,13 +70,20 @@ struct LZ77State {
     }
 };
 
-/* ── Hash function ───────────────────────────────────────────────────────── */
+/* ── Hash functions ──────────────────────────────────────────────────────── */
 
 inline uint32_t lz77_hash4(const uint8_t* p) noexcept {
     uint32_t v;
     __builtin_memcpy(&v, p, 4);
     /* Multiplicative hash: good distribution, single multiply */
     return (v * 0x1E35A7BDU) >> (32 - LZ77_HASH_BITS);
+}
+
+/* Runtime-configurable variant for fast-path with reduced hash_bits */
+inline uint32_t lz77_hash4_n(const uint8_t* p, int bits) noexcept {
+    uint32_t v;
+    __builtin_memcpy(&v, p, 4);
+    return (v * 0x1E35A7BDU) >> (32 - bits);
 }
 
 /* ── Scalar match length ─────────────────────────────────────────────────── */
