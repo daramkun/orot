@@ -51,7 +51,24 @@ int sse42_match_length(const uint8_t* a, const uint8_t* b, int max_len) {
         }
     }
 
-    /* Scalar tail */
+    /* 4-byte chunk before byte-by-byte tail */
+    if (len + 4 <= max_len) {
+        uint32_t va, vb;
+        std::memcpy(&va, a + len, 4);
+        std::memcpy(&vb, b + len, 4);
+        const uint32_t diff = va ^ vb;
+        if (diff == 0) {
+            len += 4;
+        } else {
+#if defined(__GNUC__) || defined(__clang__)
+            return len + static_cast<int>(__builtin_ctz(diff) >> 3);
+#else
+            while (len < max_len && a[len] == b[len]) ++len;
+            return len;
+#endif
+        }
+    }
+    /* Scalar tail (0-3 bytes) */
     while (len < max_len && a[len] == b[len]) ++len;
     return len;
 }

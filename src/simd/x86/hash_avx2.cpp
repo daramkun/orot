@@ -26,31 +26,56 @@ void avx2_hash_insert_bulk(
 
     size_t i = 0;
     for (; i + 8 <= limit; i += 8) {
-        /* Load 8 4-byte values at consecutive positions */
-        __m256i vals = _mm256_set_epi32(
-            *reinterpret_cast<const int*>(data + i + 7),
-            *reinterpret_cast<const int*>(data + i + 6),
-            *reinterpret_cast<const int*>(data + i + 5),
-            *reinterpret_cast<const int*>(data + i + 4),
-            *reinterpret_cast<const int*>(data + i + 3),
-            *reinterpret_cast<const int*>(data + i + 2),
-            *reinterpret_cast<const int*>(data + i + 1),
-            *reinterpret_cast<const int*>(data + i)
-        );
+        /* Load two overlapping 128-bit chunks covering data[i..i+10].
+         * Use SSSE3 _mm_alignr_epi8 to produce 8 consecutive 4-byte inputs
+         * instead of 8 individual scalar loads via _mm256_set_epi32. */
+        const __m128i c0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data + i));
+        const __m128i c1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data + i + 4));
+
+        /* 8 overlapping 4-byte windows via byte-aligned shifts */
+        const __m128i a0 = c0;
+        const __m128i a1 = _mm_alignr_epi8(c1, c0, 1);
+        const __m128i a2 = _mm_alignr_epi8(c1, c0, 2);
+        const __m128i a3 = _mm_alignr_epi8(c1, c0, 3);
+        const __m128i a4 = c1;
+        const __m128i a5 = _mm_alignr_epi8(c1, c1, 1);
+        const __m128i a6 = _mm_alignr_epi8(c1, c1, 2);
+        const __m128i a7 = _mm_alignr_epi8(c1, c1, 3);
+
+        /* Pack low 32-bit lanes into 256-bit vector */
+        const __m128i lo128 = _mm_unpacklo_epi64(
+            _mm_unpacklo_epi32(a0, a1), _mm_unpacklo_epi32(a2, a3));
+        const __m128i hi128 = _mm_unpacklo_epi64(
+            _mm_unpacklo_epi32(a4, a5), _mm_unpacklo_epi32(a6, a7));
+        const __m256i vals  = _mm256_set_m128i(hi128, lo128);
 
         __m256i hashes = _mm256_and_si256(
             _mm256_srli_epi32(_mm256_mullo_epi32(vals, MULT), shift),
             MASK);
 
-        /* Store results and insert into hash chains (scalar loop) */
+        /* Store hash results; prefetch head[] entries before reading */
         alignas(32) uint32_t h[8];
         _mm256_store_si256(reinterpret_cast<__m256i*>(h), hashes);
 
-        for (int j = 0; j < 8; ++j) {
-            const uint16_t pos = static_cast<uint16_t>((i + static_cast<size_t>(j)) & win_mask);
-            prev[pos]  = head[h[j]];
-            head[h[j]] = pos;
+        for (int j = 0; j < 8; ++j)
+            __builtin_prefetch(&head[h[j]], 0, 1);
+
+        /* Read old head values, write prev[] as contiguous 16-byte store */
+        alignas(16) uint16_t old_head[8];
+        for (int j = 0; j < 8; ++j)
+            old_head[j] = head[h[j]];
+
+        const uint16_t base_pos = static_cast<uint16_t>(i & win_mask);
+        if (base_pos + 8 <= static_cast<uint16_t>(win_mask + 1)) {
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(&prev[base_pos]),
+                _mm_load_si128(reinterpret_cast<const __m128i*>(old_head)));
+        } else {
+            for (int j = 0; j < 8; ++j)
+                prev[(base_pos + j) & win_mask] = old_head[j];
         }
+
+        for (int j = 0; j < 8; ++j)
+            head[h[j]] = static_cast<uint16_t>((i + static_cast<size_t>(j)) & win_mask);
     }
 
     /* Scalar tail */
