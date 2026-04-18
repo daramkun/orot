@@ -28,6 +28,16 @@
 | LZ77 match_find() best_len 빠른 거부 체크 (SIMD 호출 80-90% 절감) | ✅ |
 | STORED_COPY window 업데이트 bulk 전환 (바이트 루프 → circular memcpy) | ✅ |
 | LZ77 match_find() 적응형 비교 폭 (best_len≥4→uint32, ≥8→uint64) | ✅ |
+| QW-1: simd_match_length_fn() 함수 포인터 호이스팅 (루프 밖 1회 취득) | ✅ |
+| QW-2: LZ77State::reset(hash_bits) — L1-L3에서 head[] zeroing 4-32KB로 축소 | ✅ |
+| QW-3: Huffman 비트 역전 nibble 룩업 테이블 (루프 최대 15회 → O(1)) | ✅ |
+| QW-4: fast-path 매치 후 pos+1 hash 삽입 (ratio +0.5-1.5%) | ✅ |
+| M-1: lazy matching max_chain/2 (체인 탐색 비용 절반) | ✅ |
+| M-2: AVX2 hash_insert_bulk — 8 스칼라 로드 → 2×128bit load + alignr | ✅ |
+| M-3: package_merge/encode_code_lengths static 배열 제거 (스레드 안전) | ✅ |
+| M-4: AVX2 chain insert — prefetch + prev[] 16-byte 연속 스토어 | ✅ |
+| M-5: SSE4.2/NEON match tail — 4-byte XOR+ctz 스텝 추가 (7→3 scalar 최대) | ✅ |
+| D-1: BitWriter 고정 4-byte flush (bit_count≥32 시 memcpy(4)+>>32) | ✅ |
 
 ---
 
