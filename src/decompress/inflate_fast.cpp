@@ -6,12 +6,25 @@
 namespace deflate {
 
 /*
- * Inline back-copy helper: copy `len` bytes from `dist` bytes back in output.
- * Handles overlapping copies (e.g., run-length expansions).
+ * copy_match: back-copy `len` bytes from `dist` bytes back in output.
+ *
+ * Fast path: len <= 16, dist >= 16 → two word loads, no overlap possible.
+ * Non-overlapping (len <= dist): single memcpy.
+ * dist == 1: RLE memset.
+ * Overlapping (dist < len, dist > 1): doubling memcpy, O(log(len/dist)) calls.
  */
 static inline void copy_match(
     uint8_t* out, size_t dist, size_t len) noexcept
 {
+    /* Fast path: short match, guaranteed non-overlapping */
+    if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
+        uint64_t w0, w1;
+        std::memcpy(&w0, out - dist,     8);
+        std::memcpy(&w1, out - dist + 8, 8);
+        std::memcpy(out,     &w0, 8);
+        std::memcpy(out + 8, &w1, 8);
+        return;
+    }
     if (len <= dist) {
         /* Non-overlapping: always safe to memcpy */
         std::memcpy(out, out - dist, len);
@@ -23,8 +36,7 @@ static inline void copy_match(
         return;
     }
     /* Overlapping RLE expansion: doubling memcpy.
-     * Copy first `dist` bytes (non-overlapping), then double until done.
-     * O(log(len/dist)) memcpy calls instead of O(len) byte loop. */
+     * O(log(len/dist)) calls instead of O(len) byte loop. */
     std::memcpy(out, out - dist, dist);
     size_t filled = dist;
     while (filled + dist <= len) {
@@ -46,16 +58,22 @@ bool inflate_fast(
     const uint8_t* safe_out_end = out_end - 258;
 
     for (;;) {
-        /* Ensure bits available */
-        if (br.can_refill_fast())
-            br.refill_fast();
-        else
-            br.refill_safe();
+        /*
+         * Unconditional fast refill — safe because:
+         *  1. Loop entry: caller checked avail_in >= 10.
+         *  2. Loop bottom: exits when !can_refill_fast().
+         *  So at top of every iteration can_refill_fast() is guaranteed true.
+         *
+         * One refill gives 56 bits — enough for the full symbol pair:
+         *   litlen(≤15) + len_extra(≤5) + dist(≤15) + dist_extra(≤13) = 48 bits max.
+         * No intermediate refill_safe() calls needed inside the loop.
+         */
+        br.refill_fast();
 
         /* ── Decode literal/length symbol ──────────────────────────── */
         uint32_t entry = tables.litlen[br.peek_bits(LITLEN_DECODE_BITS)];
 
-        if (entry & HUFF_SUBTABLE_FLAG) {
+        if (__builtin_expect(entry & HUFF_SUBTABLE_FLAG, 0)) {
             /* Secondary table lookup (codes > LITLEN_DECODE_BITS bits) */
             const int secondary_bits = static_cast<int>((entry >> 16) & 0xFF);
             const int sec_offset     = static_cast<int>(entry & 0xFFFF);
@@ -63,42 +81,36 @@ bool inflate_fast(
             entry = tables.litlen[sec_offset + br.peek_bits(secondary_bits)];
         }
 
-        const int sym  = static_cast<int>(entry & 0xFFFF);
         const int bits = static_cast<int>((entry >> 16) & 0xFF);
         br.consume_bits(bits);
 
-        if (sym < 256) {
-            /* Literal byte */
-            *out_ptr++ = static_cast<uint8_t>(sym);
-            /* Exit fast loop if approaching output end (ensures match headroom) */
-            if (out_ptr > safe_out_end) return false;
+        if (__builtin_expect(entry & HUFF_LITERAL_FLAG, 1)) {
+            /* Literal byte — most common path; sym is in bits[7:0] */
+            *out_ptr++ = static_cast<uint8_t>(entry);
+            if (__builtin_expect(out_ptr > safe_out_end, 0)) return false;
             continue;
         }
+
+        const int sym = static_cast<int>(entry & 0xFFFF);
 
         if (sym == 256) {
             /* End-of-block: signal caller that the block is complete. */
             return true;
         }
 
-        /* Length code (sym 257-285) */
+        /* Length code (sym 257-285) — 56 bits guaranteed, no refill needed */
         const int li        = sym - 257;
         int match_len       = LENGTH_BASE[li];
         const int len_extra = LENGTH_EXTRA_BITS[li];
-        if (len_extra > 0) {
-            if (br.bits_available() < len_extra) br.refill_safe();
+        if (len_extra > 0)
             match_len += static_cast<int>(br.read_bits(len_extra));
-        }
 
-        /* ── Decode distance symbol ─────────────────────────────────── */
-        if (br.bits_available() < DIST_DECODE_BITS + 13)
-            br.refill_safe();
-
+        /* ── Decode distance symbol — still have ≥ 41 bits remaining ── */
         uint32_t dentry = tables.dist[br.peek_bits(DIST_DECODE_BITS)];
-        if (dentry & HUFF_SUBTABLE_FLAG) {
-            const int primary_bits   = DIST_DECODE_BITS;
+        if (__builtin_expect(dentry & HUFF_SUBTABLE_FLAG, 0)) {
             const int secondary_bits = static_cast<int>((dentry >> 16) & 0xFF);
             const int sec_offset     = static_cast<int>(dentry & 0xFFFF);
-            br.consume_bits(primary_bits);
+            br.consume_bits(DIST_DECODE_BITS);
             dentry = tables.dist[sec_offset + br.peek_bits(secondary_bits)];
         }
 
@@ -108,10 +120,8 @@ bool inflate_fast(
 
         int dist = DIST_BASE[di];
         const int dist_extra = DIST_EXTRA_BITS[di];
-        if (dist_extra > 0) {
-            if (br.bits_available() < dist_extra) br.refill_safe();
+        if (dist_extra > 0)
             dist += static_cast<int>(br.read_bits(dist_extra));
-        }
 
         /* Bounds check */
         if (out_ptr + match_len > out_end) return false;

@@ -111,8 +111,15 @@ static int match_find(
     const uint32_t h   = lz77_hash4(src + pos) & LZ77_HASH_MASK;
     uint16_t cur       = state.head[h];
     int      steps     = cfg.max_chain;
+    /* Early-exit threshold: if no min-match found in first quarter of chain,
+     * the input is likely high-entropy and further traversal is wasteful. */
+    const int early_exit_steps = steps - std::max(4, steps >> 2);
 
     while (steps-- > 0 && cur != 0) {
+        /* High-entropy early exit: no match in first quarter of chain → give up. */
+        if (__builtin_expect(steps == early_exit_steps && best_len < LZ77_MIN_MATCH, 0))
+            break;
+
         const int dist = (pos - static_cast<int>(cur)) & LZ77_WIN_MASK;
         if (dist == 0 || dist > LZ77_WIN_SIZE) break;
 

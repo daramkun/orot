@@ -437,8 +437,12 @@ int build_dec_table_from_lens(
         const uint16_t code = next_code[len]++;
         const uint16_t rev  = reverse_bits_u16(code, len);
 
+        /* Set HUFF_LITERAL_FLAG for literal symbols (sym < 256) so the
+         * inflate inner loop can identify literals with a single bit-test
+         * instead of a sym<256 comparison. */
         uint32_t entry = (static_cast<uint32_t>(len) << 16)
                        | static_cast<uint32_t>(sym);
+        if (sym < 256) entry |= HUFF_LITERAL_FLAG;
 
         if (len <= table_bits) {
             /* Fill all primary entries with this prefix */

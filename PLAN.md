@@ -38,6 +38,11 @@
 | M-4: AVX2 chain insert — prefetch + prev[] 16-byte 연속 스토어 | ✅ |
 | M-5: SSE4.2/NEON match tail — 4-byte XOR+ctz 스텝 추가 (7→3 scalar 최대) | ✅ |
 | D-1: BitWriter 고정 4-byte flush (bit_count≥32 시 memcpy(4)+>>32) | ✅ |
+| D-2: inflate_fast 단일 unconditional refill_fast + 내부 refill_safe 3곳 제거 | ✅ |
+| D-3: copy_match 16바이트 word-at-a-time fast path (len≤16 && dist≥16) | ✅ |
+| D-4: LZ77 체인 탐색 고엔트로피 early-exit (max_chain/4 단계 후 min-match 없으면 종료) | ✅ |
+| D-5: 디코드 테이블 HUFF_LITERAL_FLAG (bit[24]) — sym<256 비교 → 비트 테스트 전환 | ✅ |
+| D-6: HUFF_SUBTABLE_FLAG bit[24]→bit[25] 이동 (HUFF_LITERAL_FLAG와 구분) | ✅ |
 
 ---
 

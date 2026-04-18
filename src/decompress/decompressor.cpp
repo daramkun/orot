@@ -358,39 +358,42 @@ loop:
                     (PEEK_BITS(needed) >> LITLEN_DECODE_BITS)];
             }
 
-            const int sym   = static_cast<int>(e & 0xFFFF);
             const int ebits = static_cast<int>((e >> 16) & 0xFF);
             if (ebits > bit_count_) return DEFLATE_OK;
 
-            if (sym < 256) {
-                /* Literal: always safe to consume sym code, no extra bits */
+            if (e & HUFF_LITERAL_FLAG) {
+                /* Literal: sym in bits[7:0], no extra bits */
                 DROP_BITS(ebits);
-                *next_out++ = static_cast<uint8_t>(sym);
+                const uint8_t byte = static_cast<uint8_t>(e);
+                *next_out++ = byte;
                 --avail_out;
-                window_.data()[win_pos_ & (WIN_SIZE - 1)] = static_cast<uint8_t>(sym);
+                window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
                 ++win_pos_;
-            } else if (sym == 256) {
-                /* End-of-block: no extra bits needed */
-                DROP_BITS(ebits);
-                if (is_final_) { state_ = State::DONE; return DEFLATE_STREAM_END; }
-                state_ = State::BLOCK_HEADER;
-                goto loop;
             } else {
-                /* Back-reference: sym 257-285 only; 286-287 are invalid */
-                if (sym > 285) { state_ = State::ERROR; return DEFLATE_DATA_ERROR; }
-                const int li         = sym - 257;
-                const int extra_bits = LENGTH_EXTRA_BITS[li];
-                if (bit_count_ < ebits + extra_bits) return DEFLATE_OK;
+                const int sym = static_cast<int>(e & 0xFFFF);
+                if (sym == 256) {
+                    /* End-of-block: no extra bits needed */
+                    DROP_BITS(ebits);
+                    if (is_final_) { state_ = State::DONE; return DEFLATE_STREAM_END; }
+                    state_ = State::BLOCK_HEADER;
+                    goto loop;
+                } else {
+                    /* Back-reference: sym 257-285 only; 286-287 are invalid */
+                    if (sym > 285) { state_ = State::ERROR; return DEFLATE_DATA_ERROR; }
+                    const int li         = sym - 257;
+                    const int extra_bits = LENGTH_EXTRA_BITS[li];
+                    if (bit_count_ < ebits + extra_bits) return DEFLATE_OK;
 
-                DROP_BITS(ebits);
-                match_len_ = LENGTH_BASE[li];
-                if (extra_bits > 0) {
-                    const uint32_t extra = PEEK_BITS(extra_bits);
-                    DROP_BITS(extra_bits);
-                    match_len_ += static_cast<int>(extra);
+                    DROP_BITS(ebits);
+                    match_len_ = LENGTH_BASE[li];
+                    if (extra_bits > 0) {
+                        const uint32_t extra = PEEK_BITS(extra_bits);
+                        DROP_BITS(extra_bits);
+                        match_len_ += static_cast<int>(extra);
+                    }
+                    state_ = State::DECODE_DIST;
+                    goto loop;
                 }
-                state_ = State::DECODE_DIST;
-                goto loop;
             }
         }
         return DEFLATE_NEED_OUTPUT;

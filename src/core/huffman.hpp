@@ -38,7 +38,12 @@ struct HuffDistTable {
 static constexpr int LITLEN_DECODE_BITS = 11;  /* 8KB primary table: L1-cache hot on all targets */
 static constexpr int DIST_DECODE_BITS   = 8;
 
-static constexpr uint32_t HUFF_SUBTABLE_FLAG = (1U << 24);
+/* Decode table entry flag bits (above bits[23:16] = code length):
+ *   bit[24] = HUFF_LITERAL_FLAG  — set iff sym < 256 (literal byte in bits[7:0])
+ *   bit[25] = HUFF_SUBTABLE_FLAG — set iff entry is a secondary-table pointer
+ * Mutually exclusive: a secondary pointer never has LITERAL set. */
+static constexpr uint32_t HUFF_LITERAL_FLAG  = (1U << 24);
+static constexpr uint32_t HUFF_SUBTABLE_FLAG = (1U << 25);
 
 struct HuffDecTable {
     uint32_t* table;     /* primary + secondary entries (contiguous)       */
