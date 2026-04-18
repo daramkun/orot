@@ -20,9 +20,11 @@ size_t BlockCompressor::compress(
 {
     arena_.reset();
 
-    /* Allocate LZ77 hash state from arena */
-    LZ77State* state = arena_.alloc_zeroed<LZ77State>();
+    /* Allocate LZ77 hash state from arena; zero only the active hash table
+     * portion (1<<hash_bits entries) instead of the full 128 KB head[]. */
+    LZ77State* state = arena_.alloc<LZ77State>();
     if (!state) return 0;
+    state->reset(cfg_.lz77.hash_bits);
 
     /* Allocate token buffer (worst case: all literals).
      * Fall back to heap when src_len exceeds arena capacity. */

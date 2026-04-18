@@ -63,9 +63,10 @@ struct LZ77State {
     /* prev[pos & WIN_MASK] = previous position in chain */
     uint16_t prev[LZ77_WIN_SIZE];
 
-    void reset() noexcept {
-        /* memset is fine — 0 means "no entry" */
-        __builtin_memset(head, 0, sizeof(head));
+    void reset(int hash_bits = LZ77_HASH_BITS) noexcept {
+        /* Zero only the portion of head[] used by the configured hash table.
+         * At L1-L3 (hash_bits=12/14) this is 8-32 KB instead of 128 KB. */
+        __builtin_memset(head, 0, sizeof(uint16_t) * (1u << hash_bits));
         __builtin_memset(prev, 0, sizeof(prev));
     }
 };

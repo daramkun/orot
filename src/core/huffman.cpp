@@ -53,6 +53,25 @@ const DistCode DISTANCES[30] = {
 };
 
 /* =========================================================================
+ * Bit-reversal helper (nibble table, O(1) per symbol)
+ * ========================================================================= */
+
+static const uint8_t kRevNibble[16] = {
+    0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
+    0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF
+};
+
+static inline uint16_t reverse_bits_u16(uint16_t code, int len) noexcept {
+    uint16_t rev = static_cast<uint16_t>(
+        (static_cast<uint32_t>(kRevNibble[ code        & 0xF]) << 12) |
+        (static_cast<uint32_t>(kRevNibble[(code >>  4) & 0xF]) <<  8) |
+        (static_cast<uint32_t>(kRevNibble[(code >>  8) & 0xF]) <<  4) |
+         static_cast<uint32_t>(kRevNibble[(code >> 12) & 0xF])
+    );
+    return static_cast<uint16_t>(rev >> (16 - len));
+}
+
+/* =========================================================================
  * Length/distance code lookup tables
  * ========================================================================= */
 
@@ -187,15 +206,15 @@ static void package_merge(
     /* We use a flat array approach */
 
     /* freq_sorted[i] = frequency of i-th symbol in sorted order */
-    static uint64_t freq_sorted[LITLEN_SYMS];
+    uint64_t freq_sorted[LITLEN_SYMS];
     for (int i = 0; i < n; ++i)
         freq_sorted[i] = freqs[active[i]];
 
     /* coin_freq[i] = weight of package/symbol at position i in current list */
-    static uint64_t coins[LITLEN_SYMS * 2];
-    static uint64_t prev_coins[LITLEN_SYMS * 2];
-    static int      coin_count;
-    static int      prev_count;
+    uint64_t coins[LITLEN_SYMS * 2];
+    uint64_t prev_coins[LITLEN_SYMS * 2];
+    int      coin_count;
+    int      prev_count;
 
     /* Initialize: first list is just the sorted symbols */
     prev_count = n;
@@ -203,7 +222,7 @@ static void package_merge(
         prev_coins[i] = freq_sorted[i];
 
     /* bit_usage[i] = number of times symbol i is "used" across all passes */
-    static int bit_usage[LITLEN_SYMS];
+    int bit_usage[LITLEN_SYMS];
     std::memset(bit_usage, 0, sizeof(int) * static_cast<size_t>(n));
 
     for (int level = 1; level < max_bits; ++level) {
@@ -247,8 +266,8 @@ static void package_merge(
         uint64_t weight;
         int left, right;  /* -1 = leaf, index into active[] */
     };
-    static Node nodes[LITLEN_SYMS * 2];
-    static int  heap[LITLEN_SYMS * 2];
+    Node nodes[LITLEN_SYMS * 2];
+    int  heap[LITLEN_SYMS * 2];
     int n_nodes = n;
     int n_heap  = n;
 
@@ -274,8 +293,8 @@ static void package_merge(
     }
 
     /* Traverse tree, assign depths */
-    static int depth_stack[LITLEN_SYMS * 2];
-    static int node_stack [LITLEN_SYMS * 2];
+    int depth_stack[LITLEN_SYMS * 2];
+    int node_stack [LITLEN_SYMS * 2];
     int sp = 0;
     node_stack[sp]  = n_nodes - 1;
     depth_stack[sp] = 0;
@@ -372,14 +391,8 @@ void build_enc_table_from_lens(
     /* Assign codes */
     for (int i = 0; i < symbols; ++i) {
         if (lens[i] == 0) { codes[i] = 0; continue; }
-        /* Reverse bits for LSB-first output */
-        uint16_t c = next_code[lens[i]]++;
-        uint16_t rev = 0;
-        for (int b = 0; b < lens[i]; ++b) {
-            rev = static_cast<uint16_t>((rev << 1) | (c & 1));
-            c >>= 1;
-        }
-        codes[i] = rev;
+        const uint16_t c = next_code[lens[i]]++;
+        codes[i] = reverse_bits_u16(c, lens[i]);
     }
 }
 
@@ -421,16 +434,8 @@ int build_dec_table_from_lens(
         if (len == 0) continue;
 
         /* Canonical code for this symbol */
-        uint16_t code = next_code[len]++;
-        /* Bit-reverse to LSB-first */
-        uint16_t rev = 0;
-        {
-            uint16_t tmp = code;
-            for (int b = 0; b < len; ++b) {
-                rev = static_cast<uint16_t>((rev << 1) | (tmp & 1));
-                tmp >>= 1;
-            }
-        }
+        const uint16_t code = next_code[len]++;
+        const uint16_t rev  = reverse_bits_u16(code, len);
 
         uint32_t entry = (static_cast<uint32_t>(len) << 16)
                        | static_cast<uint32_t>(sym);

@@ -97,15 +97,13 @@ static int match_find(
     const uint8_t* src, int pos, int src_len,
     const LZ77State& state,
     const LZ77Config& cfg,
+    MatchLengthFn match_len_fn,
     int& best_dist)
 {
     const int max_match = std::min(LZ77_MAX_MATCH, src_len - pos);
     if (max_match < LZ77_MIN_MATCH) return 0;
     /* lz77_hash4 reads 4 bytes; need at least 4 bytes remaining */
     if (src_len - pos < 4) return 0;
-
-    /* Retrieve SIMD-accelerated match length function */
-    const auto match_len_fn = simd_match_length_fn();
 
     int best_len  = LZ77_MIN_MATCH - 1;
     best_dist     = 0;
@@ -184,6 +182,7 @@ static inline int match_find_fast(
     const uint8_t* src, int pos, int src_len,
     LZ77State& state,
     const LZ77Config& cfg,
+    MatchLengthFn match_len_fn,
     int& best_dist)
 {
     if (src_len - pos < 4) return 0;
@@ -202,7 +201,7 @@ static inline int match_find_fast(
     /* Quick first-byte check */
     if (src[cur] != src[pos]) return 0;
 
-    const int len = simd_match_length_fn()(src + pos, src + pos - dist, max_match);
+    const int len = match_len_fn(src + pos, src + pos - dist, max_match);
     if (len < LZ77_MIN_MATCH) return 0;
 
     best_dist = dist;
@@ -245,6 +244,9 @@ size_t lz77_compress(
     size_t n_tokens = 0;
     int pos = 0;
 
+    /* Hoist SIMD function pointer — avoids repeated indirect dispatch calls. */
+    const MatchLengthFn match_len_fn = simd_match_length_fn();
+
     if (cfg.fast_path) {
         /* ── Fast path (L1-L3): head-only lookup, no prev[], no lazy matching ── */
         while (pos < isrc_len) {
@@ -256,7 +258,7 @@ size_t lz77_compress(
 
             int best_dist = 0;
             /* match_find_fast also updates head[h] for pos */
-            int best_len = match_find_fast(src, pos, isrc_len, state, cfg, best_dist);
+            int best_len = match_find_fast(src, pos, isrc_len, state, cfg, match_len_fn, best_dist);
 
             if (best_len < LZ77_MIN_MATCH) {
                 out[n_tokens++] = Token::literal(src[pos++]);
@@ -264,12 +266,20 @@ size_t lz77_compress(
                 out[n_tokens++] = Token::match(
                     static_cast<uint16_t>(best_len),
                     static_cast<uint16_t>(best_dist));
-                /* Skip hashing covered positions — trades a little ratio for speed */
+                /* Insert pos+1 into hash before skipping (improves ratio at near-zero cost). */
+                if (pos + 1 + 4 <= isrc_len)
+                    state.head[lz77_hash4_n(src + pos + 1, cfg.hash_bits)] =
+                        static_cast<uint16_t>(pos + 1);
                 pos += best_len;
             }
         }
     } else {
         /* ── Standard path (L4+): full chain traversal with lazy matching ── */
+        /* Lazy checks use half the chain depth to halve their traversal cost. */
+        const int lazy_chain = std::max(1, cfg.max_chain >> 1);
+        LZ77Config lazy_cfg  = cfg;
+        lazy_cfg.max_chain   = lazy_chain;
+
         while (pos < isrc_len) {
             /* Need at least MIN_MATCH bytes for a hash key */
             if (pos + LZ77_MIN_MATCH > isrc_len) {
@@ -278,7 +288,7 @@ size_t lz77_compress(
             }
 
             int best_dist = 0;
-            int best_len  = match_find(src, pos, isrc_len, state, cfg, best_dist);
+            int best_len  = match_find(src, pos, isrc_len, state, cfg, match_len_fn, best_dist);
 
             if (best_len < LZ77_MIN_MATCH) {
                 /* No match: emit literal */
@@ -286,7 +296,8 @@ size_t lz77_compress(
                 out[n_tokens++] = Token::literal(src[pos]);
                 ++pos;
             } else {
-                /* Lazy matching: peek ahead to see if next pos has a better match */
+                /* Lazy matching: peek ahead to see if next pos has a better match.
+                 * Use half max_chain for the lazy check — halves traversal cost. */
                 int lazy_steps = cfg.lazy_depth;
                 while (lazy_steps > 0
                        && pos + best_len + 1 < isrc_len
@@ -294,7 +305,7 @@ size_t lz77_compress(
                 {
                     int next_dist = 0;
                     const int next_len = match_find(
-                        src, pos + 1, isrc_len, state, cfg, next_dist);
+                        src, pos + 1, isrc_len, state, lazy_cfg, match_len_fn, next_dist);
 
                     if (next_len > best_len + 1) {
                         /* Better match one position ahead: emit literal, advance */
