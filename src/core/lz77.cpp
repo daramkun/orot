@@ -217,6 +217,7 @@ static inline int match_find_fast(
 
 /*
  * Insert position `pos` into hash chain (L4+ full path with prev[]).
+ * Also clears bt_right so BT4 traversal sees a clean node.
  */
 static inline void hash_insert(
     const uint8_t* src, int pos, int src_len,
@@ -225,7 +226,114 @@ static inline void hash_insert(
     if (pos + 4 > src_len) return;  /* lz77_hash4 needs 4 bytes */
     const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
     state.prev[pos & LZ77_WIN_MASK] = state.head[h];
+    state.bt_right[pos & LZ77_WIN_MASK] = 0;
     state.head[h] = static_cast<uint16_t>(pos);
+}
+
+/*
+ * match_find_bt4: binary-tree match finder for L10-12.
+ *
+ * Each call BOTH finds the best match AND inserts `pos` into the tree.
+ * Uses prev[] as left children and bt_right[] as right children.
+ * Skips already-known common prefix (len_left / len_right) at each step,
+ * reducing redundant byte comparisons vs. chain search.
+ *
+ * Positions covered by a match use hash_insert (degrades to chain for
+ * those slots, which is acceptable since they won't be searched from).
+ */
+static int match_find_bt4(
+    const uint8_t* src, int pos, int src_len,
+    LZ77State& state,
+    const LZ77Config& cfg,
+    MatchLengthFn match_len_fn,
+    int& best_dist)
+{
+    const int max_match = std::min(LZ77_MAX_MATCH, src_len - pos);
+    if (max_match < LZ77_MIN_MATCH || src_len - pos < 4) {
+        /* Too close to end: just update head with no tree */
+        if (pos + 4 <= src_len) {
+            const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
+            state.prev[pos & LZ77_WIN_MASK]     = state.head[h];
+            state.bt_right[pos & LZ77_WIN_MASK] = 0;
+            state.head[h] = static_cast<uint16_t>(pos);
+        }
+        return 0;
+    }
+
+    int best_len  = LZ77_MIN_MATCH - 1;
+    best_dist     = 0;
+
+    const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
+    uint16_t cur     = state.head[h];
+
+    /* Insert pos as new root immediately */
+    state.head[h] = static_cast<uint16_t>(pos);
+
+    /* Pointers to the left/right child slots of the new node (pos) */
+    uint16_t* pleft  = &state.prev[pos & LZ77_WIN_MASK];
+    uint16_t* pright = &state.bt_right[pos & LZ77_WIN_MASK];
+
+    /* Known match lengths from the tree walk:
+     * len_left  = how many bytes already match when descending into left subtree
+     * len_right = how many bytes already match when descending into right subtree */
+    int len_left  = 0;
+    int len_right = 0;
+
+    int steps = cfg.max_chain;
+    /* Early exit: give up if no MIN_MATCH found after first half of chain */
+    const int early_exit_threshold = steps - std::max(4, steps >> 1);
+
+    while (steps-- > 0 && cur != 0) {
+        /* High-entropy early exit for BT4: first 50% of budget, no match → give up */
+        if (__builtin_expect(steps == early_exit_threshold && best_len < LZ77_MIN_MATCH, 0))
+            break;
+
+        const int dist = (pos - static_cast<int>(cur)) & LZ77_WIN_MASK;
+        if (dist == 0 || dist > LZ77_WIN_SIZE) break;
+
+        const uint8_t* cand = src + pos - dist;
+
+        /* Start from already-known prefix minimum */
+        const int skip = std::min(len_left, len_right);
+        const int avail = std::min(max_match, src_len - (pos - dist));
+
+        int len = skip;
+        if (skip < avail)
+            len = skip + match_len_fn(src + pos + skip, cand + skip, avail - skip);
+
+        if (len > best_len) {
+            best_len  = len;
+            best_dist = dist;
+            if (len >= cfg.nice_len) {
+                /* Accept: link cur's children as new node's children */
+                *pleft  = state.prev[cur & LZ77_WIN_MASK];
+                *pright = state.bt_right[cur & LZ77_WIN_MASK];
+                return best_len;
+            }
+        }
+
+        /* Navigate: compare byte at position `len` to decide left vs right */
+        if (pos + len < src_len && (pos - dist + len) < src_len
+            && cand[len] < src[pos + len])
+        {
+            /* cand sorts before pos → cur goes into left subtree of pos */
+            *pleft   = cur;
+            pleft    = &state.bt_right[cur & LZ77_WIN_MASK];
+            cur      = state.bt_right[cur & LZ77_WIN_MASK];
+            len_left = len;
+        } else {
+            /* cur sorts after pos → cur goes into right subtree of pos */
+            *pright   = cur;
+            pright    = &state.prev[cur & LZ77_WIN_MASK];
+            cur       = state.prev[cur & LZ77_WIN_MASK];
+            len_right = len;
+        }
+    }
+
+    /* Terminate both subtrees */
+    *pleft  = 0;
+    *pright = 0;
+    return best_len;
 }
 
 size_t lz77_compress(
@@ -280,8 +388,36 @@ size_t lz77_compress(
                 pos += best_len;
             }
         }
+    } else if (cfg.bt4) {
+        /* ── BT4 path (L10-12): binary-tree match finder, no lazy matching ──
+         * BT4 finds near-optimal matches without lazy; lazy matching would
+         * require careful double-insertion tracking, so it is omitted here. */
+        while (pos < isrc_len) {
+            if (pos + LZ77_MIN_MATCH > isrc_len) {
+                out[n_tokens++] = Token::literal(src[pos++]);
+                continue;
+            }
+
+            int best_dist = 0;
+            /* match_find_bt4 also inserts pos into the tree */
+            int best_len = match_find_bt4(src, pos, isrc_len, state, cfg, match_len_fn, best_dist);
+
+            if (best_len < LZ77_MIN_MATCH) {
+                out[n_tokens++] = Token::literal(src[pos]);
+                ++pos;
+            } else {
+                out[n_tokens++] = Token::match(
+                    static_cast<uint16_t>(best_len),
+                    static_cast<uint16_t>(best_dist));
+                /* Insert covered positions (pos already inserted by match_find_bt4) */
+                const int end = pos + best_len;
+                for (int i = pos + 1; i < end && i + LZ77_MIN_MATCH <= isrc_len; ++i)
+                    hash_insert(src, i, isrc_len, state);
+                pos = end;
+            }
+        }
     } else {
-        /* ── Standard path (L4+): full chain traversal with lazy matching ── */
+        /* ── Standard path (L4-9): full chain traversal with lazy matching ── */
         /* Lazy checks use half the chain depth to halve their traversal cost. */
         const int lazy_chain = std::max(1, cfg.max_chain >> 1);
         LZ77Config lazy_cfg  = cfg;

@@ -60,14 +60,17 @@ LZ77Config lz77_config_for_level(int level);
 struct LZ77State {
     /* head[hash] = most recent position for this hash value */
     uint16_t head[LZ77_HASH_SIZE];
-    /* prev[pos & WIN_MASK] = previous position in chain */
+    /* prev[pos & WIN_MASK] = previous chain pos / BT4 left child */
     uint16_t prev[LZ77_WIN_SIZE];
+    /* bt_right[pos & WIN_MASK] = BT4 right child (only used when bt4=true) */
+    uint16_t bt_right[LZ77_WIN_SIZE];
 
     void reset(int hash_bits = LZ77_HASH_BITS) noexcept {
         /* Zero only the portion of head[] used by the configured hash table.
          * At L1-L3 (hash_bits=12/14) this is 8-32 KB instead of 128 KB. */
         __builtin_memset(head, 0, sizeof(uint16_t) * (1u << hash_bits));
         __builtin_memset(prev, 0, sizeof(prev));
+        __builtin_memset(bt_right, 0, sizeof(bt_right));
     }
 };
 
@@ -76,15 +79,15 @@ struct LZ77State {
 inline uint32_t lz77_hash4(const uint8_t* p) noexcept {
     uint32_t v;
     __builtin_memcpy(&v, p, 4);
-    /* Multiplicative hash: good distribution, single multiply */
-    return (v * 0x1E35A7BDU) >> (32 - LZ77_HASH_BITS);
+    /* Fibonacci multiplicative hash: better 4-gram distribution than 0x1E35A7BD */
+    return (v * 0x9E3779B1U) >> (32 - LZ77_HASH_BITS);
 }
 
 /* Runtime-configurable variant for fast-path with reduced hash_bits */
 inline uint32_t lz77_hash4_n(const uint8_t* p, int bits) noexcept {
     uint32_t v;
     __builtin_memcpy(&v, p, 4);
-    return (v * 0x1E35A7BDU) >> (32 - bits);
+    return (v * 0x9E3779B1U) >> (32 - bits);
 }
 
 /* ── Scalar match length ─────────────────────────────────────────────────── */

@@ -474,15 +474,32 @@ loop:
                 win_pos_   += len;
                 match_len_ -= static_cast<int>(len);
             } else {
-                /* Overlapping (back < len): copy byte-at-a-time so each new
-                 * byte is immediately available as a source for the next. */
-                const size_t  src_pos = (win_pos_ - back) & (WIN_SIZE - 1);
-                const uint8_t byte    = window_.data()[src_pos];
-                *next_out++ = byte;
-                --avail_out;
-                window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
-                ++win_pos_;
-                --match_len_;
+                /* Overlapping (back < len, back > 1): doubling memcpy expansion.
+                 * Read base pattern from circular window, then double until len bytes. */
+                uint8_t pattern[258];
+                const size_t src_pos = (win_pos_ - back) & (WIN_SIZE - 1);
+                const size_t f0 = std::min(back, WIN_SIZE - src_pos);
+                std::memcpy(pattern, window_.data() + src_pos, f0);
+                if (f0 < back) std::memcpy(pattern + f0, window_.data(), back - f0);
+
+                size_t b = back;
+                while (b + b <= len) {
+                    std::memcpy(pattern + b, pattern, b);
+                    b += b;
+                }
+                if (b < len) std::memcpy(pattern + b, pattern, len - b);
+
+                std::memcpy(next_out, pattern, len);
+                next_out  += len;
+                avail_out -= len;
+
+                const size_t dst = win_pos_ & (WIN_SIZE - 1);
+                const size_t fw = std::min(len, WIN_SIZE - dst);
+                std::memcpy(window_.data() + dst, pattern, fw);
+                if (fw < len) std::memcpy(window_.data(), pattern + fw, len - fw);
+
+                win_pos_   += len;
+                match_len_ -= static_cast<int>(len);
             }
         }
         if (match_len_ > 0) return DEFLATE_NEED_OUTPUT;
