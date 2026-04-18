@@ -73,35 +73,6 @@ int sse42_match_length(const uint8_t* a, const uint8_t* b, int max_len) {
     return len;
 }
 
-/*
- * SSE4.2 hardware CRC-32 using _mm_crc32_u64.
- */
-uint32_t sse42_crc32(uint32_t crc, const uint8_t* data, size_t len) {
-    crc = ~crc;
-
-    /* 8-byte chunks */
-    while (len >= 8) {
-        uint64_t v;
-        std::memcpy(&v, data, 8);
-        crc  = static_cast<uint32_t>(_mm_crc32_u64(crc, v));
-        data += 8;
-        len  -= 8;
-    }
-
-    if (len >= 4) {
-        uint32_t v;
-        std::memcpy(&v, data, 4);
-        crc  = _mm_crc32_u32(crc, v);
-        data += 4;
-        len  -= 4;
-    }
-
-    while (len-- > 0)
-        crc = _mm_crc32_u8(crc, *data++);
-
-    return ~crc;
-}
-
 } } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_SSE42 */

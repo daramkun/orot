@@ -73,6 +73,7 @@ if(OROT_DEFLATE_SIMD)
             ${CMAKE_SOURCE_DIR}/src
         )
     target_compile_options(orot_deflate_simd_sse2 PRIVATE -msse2)
+    target_compile_definitions(orot_deflate_simd_sse2 PRIVATE DEFLATE_HAS_SSE2)
     list(APPEND OROT_DEFLATE_SIMD_OBJECTS $<TARGET_OBJECTS:orot_deflate_simd_sse2>)
   endif()
 
@@ -86,6 +87,7 @@ if(OROT_DEFLATE_SIMD)
             ${CMAKE_SOURCE_DIR}/src
         )
     target_compile_options(orot_deflate_simd_sse42 PRIVATE -msse4.2)
+    target_compile_definitions(orot_deflate_simd_sse42 PRIVATE DEFLATE_HAS_SSE42)
     list(APPEND OROT_DEFLATE_SIMD_OBJECTS $<TARGET_OBJECTS:orot_deflate_simd_sse42>)
   endif()
 
@@ -99,6 +101,7 @@ if(OROT_DEFLATE_SIMD)
             ${CMAKE_SOURCE_DIR}/src
         )
     target_compile_options(orot_deflate_simd_avx2 PRIVATE -mavx2)
+    target_compile_definitions(orot_deflate_simd_avx2 PRIVATE DEFLATE_HAS_AVX2)
     list(APPEND OROT_DEFLATE_SIMD_OBJECTS $<TARGET_OBJECTS:orot_deflate_simd_avx2>)
   endif()
 

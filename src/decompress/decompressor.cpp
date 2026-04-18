@@ -335,10 +335,27 @@ loop:
                 const size_t produced =
                     static_cast<size_t>(next_out - fast_out_start);
                 avail_out -= produced;
-                win_pos_ += produced;
+                win_pos_  += produced;
+                /* Sync window_ so the slow-path fallback and COPY_MATCH
+                 * can resolve back-references from correct history. */
+                if (produced > 0) {
+                    const uint8_t* wsrc = fast_out_start;
+                    size_t         wsz  = produced;
+                    if (wsz > WIN_SIZE) { wsrc += wsz - WIN_SIZE; wsz = WIN_SIZE; }
+                    const size_t dst = (win_pos_ - wsz) & (WIN_SIZE - 1);
+                    const size_t f   = std::min(wsz, WIN_SIZE - dst);
+                    std::memcpy(window_.data() + dst, wsrc, f);
+                    if (f < wsz)
+                        std::memcpy(window_.data(), wsrc + f, wsz - f);
+                }
 
                 if (ended) {
-                    if (is_final_) { state_ = State::DONE; return DEFLATE_STREAM_END; }
+                    if (is_final_) {
+                        const int pb = bit_count_ >> 3;
+                        next_in -= pb; avail_in += static_cast<size_t>(pb);
+                        bits_ = 0; bit_count_ = 0;
+                        state_ = State::DONE; return DEFLATE_STREAM_END;
+                    }
                     state_ = State::BLOCK_HEADER;
                     goto loop;
                 }
@@ -377,15 +394,19 @@ loop:
                 --avail_out;
                 /* In contiguous mode, COPY_MATCH reads from out_origin_ directly.
                  * Only write into circular window_ in streaming mode. */
-                if (out_origin_ == nullptr)
-                    window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
+                window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
                 ++win_pos_;
             } else {
                 const int sym = static_cast<int>(e & 0xFFFF);
                 if (sym == 256) {
                     /* End-of-block: no extra bits needed */
                     DROP_BITS(ebits);
-                    if (is_final_) { state_ = State::DONE; return DEFLATE_STREAM_END; }
+                    if (is_final_) {
+                        const int pb = bit_count_ >> 3;
+                        next_in -= pb; avail_in += static_cast<size_t>(pb);
+                        bits_ = 0; bit_count_ = 0;
+                        state_ = State::DONE; return DEFLATE_STREAM_END;
+                    }
                     state_ = State::BLOCK_HEADER;
                     goto loop;
                 } else {
@@ -473,6 +494,14 @@ loop:
                     }
                     if (filled < len)
                         std::memcpy(next_out + filled, next_out, len - filled);
+                }
+                /* Sync window_ before advancing win_pos_. */
+                {
+                    const size_t dst = win_pos_ & (WIN_SIZE - 1);
+                    const size_t f   = std::min(len, WIN_SIZE - dst);
+                    std::memcpy(window_.data() + dst, next_out, f);
+                    if (f < len)
+                        std::memcpy(window_.data(), next_out + f, len - f);
                 }
                 next_out   += len;
                 avail_out  -= len;

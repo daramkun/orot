@@ -25,7 +25,8 @@ void avx2_hash_insert_bulk(
     const __m256i MASK = _mm256_set1_epi32(static_cast<int>(hash_mask));
 
     size_t i = 0;
-    for (; i + 8 <= limit; i += 8) {
+    /* Need data[i..i+19] for the two 128-bit loads; scalar tail covers the rest. */
+    for (; i + 20 <= len; i += 8) {
         /* Load two overlapping 128-bit chunks covering data[i..i+10].
          * Use SSSE3 _mm_alignr_epi8 to produce 8 consecutive 4-byte inputs
          * instead of 8 individual scalar loads via _mm256_set_epi32. */
@@ -114,6 +115,10 @@ uint32_t avx2_adler32(uint32_t adler, const uint8_t* data, size_t len) {
         const uint8_t* p = data;
 
         while (p + 32 <= end) {
+            /* Cross-block contribution: each of the 32 new bytes adds vs1 once to s2
+             * (equivalent to: s2 += old_s1 for each of the 32 bytes, before byte is added). */
+            vs2 = _mm256_add_epi32(vs2, _mm256_slli_epi32(vs1, 5));  /* vs2 += vs1 * 32 */
+
             __m256i bytes = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
             /* Unpack to 16-bit to avoid saturation */
             __m256i lo = _mm256_unpacklo_epi8(bytes, _mm256_setzero_si256());
