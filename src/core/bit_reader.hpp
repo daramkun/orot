@@ -119,6 +119,13 @@ public:
     uint64_t raw_bits()       const noexcept { return bits_; }
     int      raw_bit_count()  const noexcept { return bit_count_; }
 
+    /* Restore state after an inner loop that hoisted bits/ptr to local variables. */
+    void restore(const uint8_t* ptr, uint64_t bits, int bit_count) noexcept {
+        ptr_       = ptr;
+        bits_      = bits;
+        bit_count_ = bit_count;
+    }
+
     /** True when >= 8 bytes of raw input remain (safe for refill_fast). */
     bool can_refill_fast() const noexcept { return ptr_ + 8 <= end_; }
 

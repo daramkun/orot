@@ -284,7 +284,12 @@ loop:
                 static_cast<size_t>(stored_len_ - stored_pos_),
                 std::min(avail_in, avail_out));
             std::memcpy(next_out, next_in, copy);
-            sync_window_from_buf(next_in, copy);
+            /* Contiguous mode: back-references resolved from out_origin_, no
+             * need to copy into circular window_.  Streaming mode still syncs. */
+            if (out_origin_ != nullptr)
+                win_pos_ += copy;
+            else
+                sync_window_from_buf(next_in, copy);
             next_in    += copy; avail_in  -= copy;
             next_out   += copy; avail_out -= copy;
             stored_pos_ = static_cast<uint16_t>(stored_pos_ + static_cast<uint16_t>(copy));
@@ -323,11 +328,14 @@ loop:
                 bits_       = br.raw_bits();
                 bit_count_  = br.raw_bit_count();
 
-                /* Sync window_ with produced output for the fallback path. */
+                /* Track produced output.  In contiguous mode, back-references
+                 * are resolved directly from out_origin_, so window_ sync is
+                 * deferred; only win_pos_ needs updating.  Streaming mode still
+                 * syncs so the slow-path COPY_MATCH has valid window state. */
                 const size_t produced =
                     static_cast<size_t>(next_out - fast_out_start);
                 avail_out -= produced;
-                sync_window_from_buf(fast_out_start, produced);
+                win_pos_ += produced;
 
                 if (ended) {
                     if (is_final_) { state_ = State::DONE; return DEFLATE_STREAM_END; }
@@ -367,7 +375,10 @@ loop:
                 const uint8_t byte = static_cast<uint8_t>(e);
                 *next_out++ = byte;
                 --avail_out;
-                window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
+                /* In contiguous mode, COPY_MATCH reads from out_origin_ directly.
+                 * Only write into circular window_ in streaming mode. */
+                if (out_origin_ == nullptr)
+                    window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
                 ++win_pos_;
             } else {
                 const int sym = static_cast<int>(e & 0xFFFF);
@@ -442,7 +453,33 @@ loop:
             const size_t back = static_cast<size_t>(match_dist_);
             const size_t len  = std::min(static_cast<size_t>(match_len_), avail_out);
 
-            if (back == 1) {
+            /* Contiguous mode: back-reference falls within the output buffer we
+             * already wrote.  Resolve directly without touching window_[]. */
+            if (out_origin_ != nullptr &&
+                static_cast<size_t>(next_out - out_origin_) >= back) {
+
+                const uint8_t* src_ptr = next_out - back;
+                if (back == 1) {
+                    std::memset(next_out, src_ptr[0], len);
+                } else if (back >= len) {
+                    std::memcpy(next_out, src_ptr, len);
+                } else {
+                    /* Overlapping: doubling expansion in-place */
+                    size_t filled = back;
+                    std::memcpy(next_out, src_ptr, filled);
+                    while (filled + filled <= len) {
+                        std::memcpy(next_out + filled, next_out, filled);
+                        filled += filled;
+                    }
+                    if (filled < len)
+                        std::memcpy(next_out + filled, next_out, len - filled);
+                }
+                next_out   += len;
+                avail_out  -= len;
+                win_pos_   += len;
+                match_len_ -= static_cast<int>(len);
+
+            } else if (back == 1) {
                 /* Single-byte RLE: memset the repeated byte. */
                 const uint8_t byte = window_.data()[(win_pos_ - 1) & (WIN_SIZE - 1)];
                 std::memset(next_out, byte, len);

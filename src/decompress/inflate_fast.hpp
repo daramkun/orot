@@ -25,8 +25,11 @@ namespace deflate {
 static constexpr int LITLEN_TABLE_SIZE = 1 << LITLEN_DECODE_BITS;
 static constexpr int DIST_TABLE_SIZE   = 1 << DIST_DECODE_BITS;
 
-/* Max secondary table entries (conservative upper bound) */
-static constexpr int LITLEN_TABLE_EXTRA = 1024;
+/* Max secondary table entries (conservative upper bound).
+ * With 9-bit primary, codes 10-15 bits go to secondary tables.
+ * Worst case: ~512 secondary tables × 64 entries = 32768, but practical
+ * DEFLATE streams use far fewer long codes.  4096 is ample in practice. */
+static constexpr int LITLEN_TABLE_EXTRA = 4096;
 static constexpr int DIST_TABLE_EXTRA   = 256;
 
 /*

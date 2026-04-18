@@ -12,7 +12,6 @@
  * Run:   ./build/tests/bench_compare [iterations]
  */
 
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>

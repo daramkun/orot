@@ -71,7 +71,7 @@ size_t ParallelCompressor::compress(
         blocks[i].src_len = blen;
         blocks[i].tokens.resize(blen > 0 ? blen : 1);
         blocks[i].state.reset(new LZ77State{});
-        std::memset(blocks[i].state.get(), 0, sizeof(LZ77State));
+        blocks[i].state->reset(cfg.lz77.hash_bits, cfg.lz77.bt4);
 
         pool_.submit([&, i] {
             auto& b = blocks[i];

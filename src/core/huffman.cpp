@@ -421,14 +421,57 @@ int build_dec_table_from_lens(
     }
 
     const int primary_size = 1 << table_bits;
+
+    /* ── Pass 1: find max secondary bits per primary index ────────────────
+     * Simulate code assignment to discover which primary slots need secondary
+     * tables and what their maximum secondary depth is.  This pre-scan lets
+     * us allocate the right-sized secondary table in one shot, fixing the
+     * bug where the first-seen code determined the secondary table size.    */
+    static constexpr int MAX_PRIMARY = (1 << 11); /* upper bound for table_bits */
+    uint8_t max_sec_bits[MAX_PRIMARY] = {};
+    {
+        uint16_t tmp[MAX_CODE_BITS + 2];
+        std::memcpy(tmp, next_code, sizeof(tmp));
+        for (int sym = 0; sym < symbols; ++sym) {
+            const int len = lens[sym];
+            if (len == 0) continue;
+            const uint16_t code = tmp[len]++;
+            if (len <= table_bits) continue;
+            const uint16_t rev = reverse_bits_u16(code, len);
+            const int pi       = rev & (primary_size - 1);
+            const int sb       = len - table_bits;
+            if (sb > max_sec_bits[pi]) max_sec_bits[pi] = static_cast<uint8_t>(sb);
+        }
+    }
+
     /* Initialize primary table entries to "invalid" */
     for (int i = 0; i < primary_size; ++i)
         table[i] = 0xFFFFFFFFU;
 
-    int n_extra = 0; /* secondary table entries used */
-    int n_secondary_start = primary_size;
+    /* ── Pass 1b: pre-allocate secondary tables ───────────────────────────
+     * Each primary slot with long codes gets a secondary table sized for the
+     * maximum code length at that slot.  This guarantees that shorter codes
+     * at the same slot can safely fill their (larger-step) portion without
+     * overrunning the allocation.                                           */
+    int n_extra = 0;
+    const int n_secondary_start = primary_size;
+    int sec_offsets[MAX_PRIMARY];
+    for (int i = 0; i < primary_size; ++i) sec_offsets[i] = -1;
 
-    /* Assign decode table entries */
+    for (int i = 0; i < primary_size; ++i) {
+        if (max_sec_bits[i] == 0) continue;
+        const int sec_size  = 1 << max_sec_bits[i];
+        const int sec_start = n_secondary_start + n_extra;
+        for (int k = 0; k < sec_size; ++k)
+            table[sec_start + k] = 0xFFFFFFFFU;
+        table[i] = HUFF_SUBTABLE_FLAG
+                 | (static_cast<uint32_t>(max_sec_bits[i]) << 16)
+                 | static_cast<uint32_t>(sec_start);
+        sec_offsets[i] = sec_start;
+        n_extra += sec_size;
+    }
+
+    /* ── Pass 2: fill entries ─────────────────────────────────────────────*/
     for (int sym = 0; sym < symbols; ++sym) {
         const int len = lens[sym];
         if (len == 0) continue;
@@ -445,37 +488,21 @@ int build_dec_table_from_lens(
         if (sym < 256) entry |= HUFF_LITERAL_FLAG;
 
         if (len <= table_bits) {
-            /* Fill all primary entries with this prefix */
-            const int step  = 1 << len;
-            const int first = rev;
-            for (int k = first; k < primary_size; k += step)
+            /* Fill all primary entries sharing this code's prefix */
+            const int step = 1 << len;
+            for (int k = rev; k < primary_size; k += step)
                 table[k] = entry;
         } else {
-            /* Long code: goes in secondary table */
-            /* Primary entry: secondary table pointer */
-            const int primary_idx = rev & (primary_size - 1);
-            const int secondary_bits = len - table_bits;
-
-            uint32_t& primary_entry = table[primary_idx];
-            int sec_offset;
-            if ((primary_entry & HUFF_SUBTABLE_FLAG) == 0 ||
-                primary_entry == 0xFFFFFFFFU)
-            {
-                /* Allocate secondary subtable of size 2^secondary_bits */
-                sec_offset = n_secondary_start + n_extra;
-                n_extra += (1 << secondary_bits);
-                primary_entry = HUFF_SUBTABLE_FLAG
-                    | (static_cast<uint32_t>(secondary_bits) << 16)
-                    | static_cast<uint32_t>(sec_offset);
-            } else {
-                sec_offset = static_cast<int>(primary_entry & 0xFFFF);
-            }
-
-            /* Fill secondary table */
-            const uint32_t secondary_idx = (rev >> table_bits);
-            const int step = 1 << secondary_bits;
-            const int sub_size = 1 << secondary_bits;
-            for (int k = static_cast<int>(secondary_idx); k < sub_size; k += step)
+            /* Long code: fill the correct slice of the pre-allocated secondary table */
+            const int pi          = rev & (primary_size - 1);
+            const int sec_bits    = len - table_bits;
+            const int sec_offset  = sec_offsets[pi];
+            const int max_sec     = max_sec_bits[pi];
+            /* step = 2^sec_bits fills all positions in the max_sec table
+             * whose low sec_bits match (rev >> table_bits).              */
+            const int step     = 1 << sec_bits;
+            const int sub_size = 1 << max_sec;
+            for (int k = static_cast<int>(rev >> table_bits); k < sub_size; k += step)
                 table[sec_offset + k] = entry;
         }
     }

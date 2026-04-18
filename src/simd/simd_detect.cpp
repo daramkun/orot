@@ -84,6 +84,7 @@ static SIMDDispatch build_dispatch() {
 #if defined(DEFLATE_HAS_NEON)
     d.match_length    = neon_match_length;
     d.hash_insert_bulk = neon_hash_insert_bulk;
+    d.adler32         = neon_adler32;
 #endif
 #if defined(DEFLATE_HAS_CRC_ARM)
     d.crc32           = arm_crc32;

@@ -20,7 +20,7 @@ public:
 
     /*
      * Decompress incrementally.
-     * Updates *next_in/*avail_in/*next_out/*avail_out.
+     * Updates *next_in, *avail_in, *next_out, *avail_out.
      * Returns:
      *   DEFLATE_OK         - more I/O needed
      *   DEFLATE_STREAM_END - final block decoded

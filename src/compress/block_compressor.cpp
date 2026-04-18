@@ -24,7 +24,7 @@ size_t BlockCompressor::compress(
      * portion (1<<hash_bits entries) instead of the full 128 KB head[]. */
     LZ77State* state = arena_.alloc<LZ77State>();
     if (!state) return 0;
-    state->reset(cfg_.lz77.hash_bits);
+    state->reset(cfg_.lz77.hash_bits, cfg_.lz77.bt4);
 
     /* Allocate token buffer (worst case: all literals).
      * Fall back to heap when src_len exceeds arena capacity. */

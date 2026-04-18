@@ -35,7 +35,7 @@ struct HuffDistTable {
  *
  * Secondary table: entries for codes longer than DECODE_TABLE_BITS bits.
  */
-static constexpr int LITLEN_DECODE_BITS = 11;  /* 8KB primary table: L1-cache hot on all targets */
+static constexpr int LITLEN_DECODE_BITS = 9;   /* 2KB primary table: fits tightly in L1 cache */
 static constexpr int DIST_DECODE_BITS   = 8;
 
 /* Decode table entry flag bits (above bits[23:16] = code length):
@@ -57,7 +57,7 @@ struct HuffDecTable {
 /* ── Fixed (RFC 1951) Huffman tables ─────────────────────────────────────── */
 void build_fixed_litlen_enc(HuffEncTable& out);
 void build_fixed_dist_enc  (HuffDistTable& out);
-void build_fixed_litlen_dec(uint32_t* table);  /* table must be 2^11 entries */
+void build_fixed_litlen_dec(uint32_t* table);  /* table must be >= 2^LITLEN_DECODE_BITS entries */
 void build_fixed_dist_dec  (uint32_t* table);  /* table must be 2^8 entries  */
 
 /* ── Dynamic Huffman tree construction ───────────────────────────────────── */
