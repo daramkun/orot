@@ -5,7 +5,7 @@
 #include <cstring>
 #include <new>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* Minimum alignment for SIMD: 64 bytes covers AVX-512 / cache line */
 inline constexpr size_t SIMD_ALIGN = 64;
@@ -78,4 +78,4 @@ private:
     size_t count_ = 0;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

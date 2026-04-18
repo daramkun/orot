@@ -2,9 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "../../include/deflate/deflate_types.h"
+#include "../../include/orot/deflate_types.h"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* RFC 1952 gzip framing: 10-byte header, CRC-32 + ISIZE trailer */
 
@@ -22,4 +22,4 @@ deflate_result gzip_decompress(
 
 size_t gzip_compress_bound(size_t src_len);
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

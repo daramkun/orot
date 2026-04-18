@@ -21,7 +21,7 @@
 #include <time.h>
 
 /* ── Library headers ─────────────────────────────────────────────────── */
-#include "deflate/deflate.h"   /* ours */
+#include "orot/deflate.h"   /* ours */
 #include <zlib.h>              /* zlib */
 #include <libdeflate.h>        /* libdeflate */
 

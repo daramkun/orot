@@ -1,12 +1,12 @@
-#include "../simd_dispatch.hpp"
-
 /* arm_crc32: hardware CRC requires DEFLATE_HAS_CRC_ARM */
 #if defined(DEFLATE_HAS_CRC_ARM)
+
+#include "../simd_dispatch.hpp"
 
 #include <arm_acle.h>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 uint32_t arm_crc32(uint32_t crc, const uint8_t* data, size_t len) {
     crc = ~crc;
@@ -37,7 +37,7 @@ uint32_t arm_crc32(uint32_t crc, const uint8_t* data, size_t len) {
     return ~crc;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_CRC_ARM */
 
@@ -47,7 +47,7 @@ uint32_t arm_crc32(uint32_t crc, const uint8_t* data, size_t len) {
 #include <arm_neon.h>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
     static constexpr uint32_t MOD_ADLER = 65521;
@@ -102,6 +102,6 @@ uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
     return (s2 << 16) | s1;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_NEON */

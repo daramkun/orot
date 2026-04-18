@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include "inflate_fast.hpp"
-#include "../../include/deflate/deflate_types.h"
+#include "../../include/orot/deflate_types.h"
 #include "../memory/arena.hpp"
 #include "../memory/aligned_alloc.hpp"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * DEFLATE decompressor state machine.
@@ -91,4 +91,4 @@ private:
     void sync_window_from_buf(const uint8_t* buf_start, size_t len) noexcept;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

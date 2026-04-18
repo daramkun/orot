@@ -10,7 +10,7 @@
 #include <vector>
 #include <memory>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* Choose default block size based on compression level */
 static size_t default_block_size(int level) {
@@ -158,4 +158,4 @@ size_t ParallelCompressor::deflate_compress_bound_internal(size_t n) const {
     return raw;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

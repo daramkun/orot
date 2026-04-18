@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* ── Block types (RFC 1951 §3.2.3) ──────────────────────────────────────── */
 enum class BlockType : int {
@@ -97,4 +97,4 @@ void compute_block_stats(
 size_t estimate_fixed_bits  (const BlockStats& stats);
 size_t estimate_dynamic_bits(const BlockStats& stats);
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

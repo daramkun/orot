@@ -2,9 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "../../include/deflate/deflate_types.h"
+#include "../../include/orot/deflate_types.h"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* RFC 1950 zlib framing: CMF+FLG header, Adler-32 trailer */
 
@@ -20,4 +20,4 @@ deflate_result zlib_decompress(
 
 size_t zlib_compress_bound(size_t src_len);
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

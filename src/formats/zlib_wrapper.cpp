@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* zlib header:
  *   CMF: 0x78 = deflate (CM=8), window=32KB (CINFO=7)
@@ -84,4 +84,4 @@ deflate_result zlib_decompress(
     return DEFLATE_OK;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

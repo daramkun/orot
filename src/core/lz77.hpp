@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* ── Constants ───────────────────────────────────────────────────────────── */
 
@@ -133,4 +133,4 @@ void lz77_insert_dict(
     const uint8_t* dict, size_t dict_len,
     LZ77State& state);
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

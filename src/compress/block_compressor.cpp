@@ -5,7 +5,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 BlockCompressor::BlockCompressor(int level)
     : cfg_(compress_config_for_level(level))
@@ -57,4 +57,4 @@ size_t BlockCompressor::compress(
     return out_bytes;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

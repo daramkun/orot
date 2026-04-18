@@ -5,7 +5,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 Compressor::Compressor(int level)
     : cfg_(compress_config_for_level(level))
@@ -96,4 +96,4 @@ deflate_result Compressor::compress(
     }
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

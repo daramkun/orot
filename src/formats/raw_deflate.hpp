@@ -2,9 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "../../include/deflate/deflate_types.h"
+#include "../../include/orot/deflate_types.h"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* Raw DEFLATE (RFC 1951): no framing, no checksum */
 
@@ -21,4 +21,4 @@ deflate_result raw_decompress(
 
 size_t raw_compress_bound(size_t src_len);
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

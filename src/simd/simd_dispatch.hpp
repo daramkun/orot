@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* ── Function pointer types ──────────────────────────────────────────────── */
 
@@ -91,4 +91,4 @@ void     sse2_hash_insert_bulk(
     uint16_t* head, uint16_t* prev, int hash_bits);
 #endif
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

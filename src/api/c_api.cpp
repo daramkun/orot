@@ -1,11 +1,11 @@
-#include "deflate/deflate.h"
+#include "orot/deflate.h"
 #include "formats/raw_deflate.hpp"
 #include "formats/zlib_wrapper.hpp"
 #include "formats/gzip_wrapper.hpp"
 #include "simd/simd_dispatch.hpp"
 
 #include <cstring>
-#include <new>
+#include <cstdlib>
 
 namespace {
 
@@ -34,14 +34,6 @@ deflate_allocator g_alloc = {
 
 extern "C" {
 
-/* ── Version ─────────────────────────────────────────────────────────────── */
-
-uint32_t deflate_version(void) { return DEFLATE_VERSION; }
-
-const char* deflate_version_string(void) {
-    return "1.0.0";
-}
-
 /* ── Allocator ───────────────────────────────────────────────────────────── */
 
 void deflate_set_allocator(const deflate_allocator* alloc) {
@@ -51,7 +43,7 @@ void deflate_set_allocator(const deflate_allocator* alloc) {
 /* ── Whole-buffer API ────────────────────────────────────────────────────── */
 
 size_t deflate_compress_bound(size_t in_size, deflate_format format) {
-    size_t n = deflate::raw_compress_bound(in_size);
+    size_t n = orot::deflate::raw_compress_bound(in_size);
     switch (format) {
     case DEFLATE_FORMAT_ZLIB: n += 6;  break;
     case DEFLATE_FORMAT_GZIP: n += 18; break;
@@ -71,11 +63,11 @@ size_t deflate_compress(
 
     switch (format) {
     case DEFLATE_FORMAT_RAW:
-        return deflate::raw_compress(src, in_size, dst, out_capacity, level);
+        return orot::deflate::raw_compress(src, in_size, dst, out_capacity, level);
     case DEFLATE_FORMAT_ZLIB:
-        return deflate::zlib_compress(src, in_size, dst, out_capacity, level);
+        return orot::deflate::zlib_compress(src, in_size, dst, out_capacity, level);
     case DEFLATE_FORMAT_GZIP:
-        return deflate::gzip_compress(src, in_size, dst, out_capacity, level);
+        return orot::deflate::gzip_compress(src, in_size, dst, out_capacity, level);
     }
     return 0;
 }
@@ -91,11 +83,11 @@ deflate_result deflate_decompress(
 
     switch (format) {
     case DEFLATE_FORMAT_RAW:
-        return deflate::raw_decompress(src, in_size, dst, out_capacity, actual_out_size);
+        return orot::deflate::raw_decompress(src, in_size, dst, out_capacity, actual_out_size);
     case DEFLATE_FORMAT_ZLIB:
-        return deflate::zlib_decompress(src, in_size, dst, out_capacity, actual_out_size);
+        return orot::deflate::zlib_decompress(src, in_size, dst, out_capacity, actual_out_size);
     case DEFLATE_FORMAT_GZIP:
-        return deflate::gzip_decompress(src, in_size, dst, out_capacity, actual_out_size);
+        return orot::deflate::gzip_decompress(src, in_size, dst, out_capacity, actual_out_size);
     }
     return DEFLATE_PARAM_ERROR;
 }
@@ -103,12 +95,12 @@ deflate_result deflate_decompress(
 /* ── Checksum utilities ──────────────────────────────────────────────────── */
 
 uint32_t deflate_adler32(uint32_t initial, const void* data, size_t len) {
-    return deflate::simd_adler32_fn()(initial,
+    return orot::deflate::simd_adler32_fn()(initial,
         static_cast<const uint8_t*>(data), len);
 }
 
 uint32_t deflate_crc32(uint32_t initial, const void* data, size_t len) {
-    return deflate::simd_crc32_fn()(initial,
+    return orot::deflate::simd_crc32_fn()(initial,
         static_cast<const uint8_t*>(data), len);
 }
 

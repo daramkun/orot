@@ -3,7 +3,7 @@
 
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* =========================================================================
  * Scalar fallbacks
@@ -109,4 +109,4 @@ const SIMDDispatch& get_simd_dispatch() {
     return dispatch;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

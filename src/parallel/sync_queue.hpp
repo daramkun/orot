@@ -3,9 +3,8 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * Lock-free SPSC (single-producer single-consumer) ring queue.
@@ -52,4 +51,4 @@ private:
     alignas(64) std::atomic<size_t> tail_{0};
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * copy_match: back-copy `len` bytes from `dist` bytes back in output.
@@ -180,4 +180,4 @@ done:
     return ended;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

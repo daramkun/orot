@@ -8,7 +8,7 @@
 #include "../memory/arena.hpp"
 #include "../memory/aligned_alloc.hpp"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * Whole-buffer block compressor (libdeflate style).
@@ -43,4 +43,4 @@ private:
     std::vector<Token>      heap_tokens_; /* overflow fallback for large blocks */
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

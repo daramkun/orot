@@ -16,7 +16,7 @@ static int failures = 0;
     } \
 } while (0)
 
-using namespace deflate;
+using namespace orot::deflate;
 
 static void test_fixed_litlen() {
     HuffEncTable t;

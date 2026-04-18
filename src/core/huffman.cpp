@@ -5,7 +5,7 @@
 #include <cstring>
 #include <limits>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* =========================================================================
  * RFC 1951 static tables
@@ -510,4 +510,4 @@ int build_dec_table_from_lens(
     return primary_size + n_extra;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

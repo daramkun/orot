@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
@@ -8,7 +7,7 @@
 #include <thread>
 #include <vector>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * Simple work-queue thread pool.
@@ -88,4 +87,4 @@ private:
     bool                                stop_    = false;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

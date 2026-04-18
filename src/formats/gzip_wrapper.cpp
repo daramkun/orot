@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* gzip magic + method + flags + mtime + xfl + os */
 static constexpr uint8_t GZIP_MAGIC[2] = { 0x1F, 0x8B };
@@ -137,4 +137,4 @@ deflate_result gzip_decompress(
     return DEFLATE_OK;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

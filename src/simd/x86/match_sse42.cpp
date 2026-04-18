@@ -1,11 +1,11 @@
-#include "../simd_dispatch.hpp"
-
 #if defined(DEFLATE_HAS_SSE42)
+
+#include "../simd_dispatch.hpp"
 
 #include <nmmintrin.h>  /* SSE4.2 */
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * SSE4.2 match length using PCMPISTRM / compare 16 bytes at once.
@@ -102,6 +102,6 @@ uint32_t sse42_crc32(uint32_t crc, const uint8_t* data, size_t len) {
     return ~crc;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_SSE42 */

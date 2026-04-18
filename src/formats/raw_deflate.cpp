@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 size_t raw_compress_bound(size_t src_len) {
     /* Worst case: stored blocks, 5 bytes overhead per 65535 bytes */
@@ -53,4 +53,4 @@ deflate_result raw_decompress(
     return (r < 0) ? r : DEFLATE_DATA_ERROR;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

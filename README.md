@@ -1,6 +1,6 @@
-# deflate
+# orot
 
-C++20 DEFLATE 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC 1950), gzip (RFC 1952) 포맷 지원.
+C++20 무손실 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC 1950), gzip (RFC 1952) 포맷 지원.
 
 ## 특징
 
@@ -25,12 +25,12 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-정적 라이브러리 `build/libdeflate.a` 생성.
+정적 라이브러리 `build/liborot.a` 생성.
 
 ### 공유 라이브러리로 빌드
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DDEFLATE_SHARED=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_SHARED=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -40,28 +40,28 @@ cmake --build build -j$(nproc)
 cmake --install build --prefix /usr/local
 ```
 
-헤더는 `include/deflate/`, 라이브러리는 `lib/`에 설치.
+헤더는 `include/orot/`, 라이브러리는 `lib/`에 설치.
 
 ## CMake 옵션
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 가속 |
-| `DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
-| `DEFLATE_TESTS` | OFF | 유닛 테스트 빌드 |
-| `DEFLATE_BENCH` | OFF | 단일 라이브러리 벤치마크 |
-| `DEFLATE_COMPARE_BENCH` | OFF | zlib/libdeflate 비교 벤치마크 |
-| `DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
-| `DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
-| `DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
-| `DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
+| `OROT_DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 가속 |
+| `OROT_DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
+| `OROT_DEFLATE_TESTS` | OFF | 유닛 테스트 빌드 |
+| `OROT_DEFLATE_BENCH` | OFF | 단일 라이브러리 벤치마크 |
+| `OROT_DEFLATE_COMPARE_BENCH` | OFF | zlib/libdeflate 비교 벤치마크 |
+| `OROT_DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
+| `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
+| `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
+| `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
 
 ## 테스트
 
 ### 테스트 빌드
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DDEFLATE_TESTS=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_TESTS=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -95,7 +95,7 @@ ctest --test-dir build -R "roundtrip|formats|levels"
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DDEFLATE_TESTS=ON -DDEFLATE_COMPAT_TEST=ON
+      -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j$(nproc)
 ctest --test-dir build -R compat
 ```
@@ -105,7 +105,7 @@ ctest --test-dir build -R compat
 ### 단일 라이브러리 벤치마크
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DDEFLATE_BENCH=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_BENCH=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench/bench_compress
 ```
@@ -114,7 +114,7 @@ cmake --build build -j$(nproc)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DDEFLATE_BENCH=ON -DDEFLATE_COMPARE_BENCH=ON
+      -DOROT_DEFLATE_BENCH=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench/bench_compare
 ```
@@ -125,20 +125,20 @@ cmake --build build -j$(nproc)
 
 ```cmake
 include(FetchContent)
-FetchContent_Declare(deflate
-    GIT_REPOSITORY https://github.com/yourname/deflate.git
+FetchContent_Declare(orot
+    GIT_REPOSITORY https://github.com/yourname/orot.git
     GIT_TAG        main
 )
-FetchContent_MakeAvailable(deflate)
+FetchContent_MakeAvailable(orot)
 
-target_link_libraries(your_target PRIVATE deflate)
+target_link_libraries(your_target PRIVATE orot)
 ```
 
 ### add_subdirectory
 
 ```cmake
-add_subdirectory(deflate)
-target_link_libraries(your_target PRIVATE deflate)
+add_subdirectory(orot)
+target_link_libraries(your_target PRIVATE orot)
 ```
 
 ## API 사용 예시
@@ -146,31 +146,31 @@ target_link_libraries(your_target PRIVATE deflate)
 ### C++ (whole-buffer)
 
 ```cpp
-#include <deflate/deflate.hpp>
+#include <orot/deflate.hpp>
 
 // 압축
 std::vector<uint8_t> input = ...;
 std::vector<uint8_t> compressed =
-    deflate::compress(input, deflate::Level::Default, deflate::Format::Gzip);
+    orot::deflate::compress(input, orot::deflate::Level::Default, orot::deflate::Format::Gzip);
 
 // 해제
 std::vector<uint8_t> restored =
-    deflate::decompress(compressed, deflate::Format::Gzip);
+    orot::deflate::decompress(compressed, orot::deflate::Format::Gzip);
 ```
 
 ### C++ (streaming)
 
 ```cpp
-#include <deflate/deflate.hpp>
+#include <orot/deflate.hpp>
 
 // 압축
-deflate::Compressor cmp(deflate::Level::Default, deflate::Format::Zlib);
+orot::deflate::Compressor cmp(orot::deflate::Level::Default, orot::deflate::Format::Zlib);
 std::array<uint8_t, 65536> outbuf;
 size_t n = cmp.feed(input_span, outbuf);
 size_t final_n = cmp.finish(outbuf);
 
 // 해제
-deflate::Decompressor dec(deflate::Format::Zlib);
+orot::deflate::Decompressor dec(orot::deflate::Format::Zlib);
 bool done = false;
 size_t written = dec.feed(compressed_span, outbuf, done);
 ```
@@ -178,11 +178,11 @@ size_t written = dec.feed(compressed_span, outbuf, done);
 ### C++ (병렬 압축)
 
 ```cpp
-#include <deflate/deflate.hpp>
+#include <orot/deflate.hpp>
 
-deflate::ParallelCompressor pc(
-    deflate::Level::Default,
-    deflate::Format::Gzip,
+orot::deflate::ParallelCompressor pc(
+    orot::deflate::Level::Default,
+    orot::deflate::Format::Gzip,
     0,      // threads: 0 = 자동
     0       // block_size: 0 = 자동
 );
@@ -192,7 +192,7 @@ auto out = pc.compress(input_span);
 ### C API
 
 ```c
-#include <deflate/deflate.h>
+#include <orot/deflate.h>
 
 // 압축
 size_t bound = deflate_compress_bound(in_size, DEFLATE_FORMAT_GZIP);
@@ -223,3 +223,6 @@ deflate_result r = deflate_decompress(
 | Raw DEFLATE | `DEFLATE_FORMAT_RAW` | 없음 | 1951 |
 | zlib | `DEFLATE_FORMAT_ZLIB` | Adler-32 | 1950 |
 | gzip | `DEFLATE_FORMAT_GZIP` | CRC-32 | 1952 |
+```
+
+이제 PLAN.md도 확인하고 업데이트하겠습니다.

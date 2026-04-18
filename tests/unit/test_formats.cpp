@@ -6,7 +6,7 @@
 #include <cstring>
 #include <vector>
 
-#include "deflate/deflate.h"
+#include "orot/deflate.h"
 
 static int failures = 0;
 

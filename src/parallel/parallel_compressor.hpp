@@ -2,11 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 #include "thread_pool.hpp"
-#include "../../include/deflate/deflate_types.h"
+#include "../../include/orot/deflate_types.h"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * pigz-style parallel compressor.
@@ -45,4 +44,4 @@ private:
     ThreadPool     pool_;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

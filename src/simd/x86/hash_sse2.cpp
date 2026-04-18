@@ -1,11 +1,11 @@
-#include "../simd_dispatch.hpp"
-
 #if defined(DEFLATE_HAS_SSE2)
+
+#include "../simd_dispatch.hpp"
 
 #include <emmintrin.h>  /* SSE2 */
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * SSE2 bulk hash insert.
@@ -52,6 +52,6 @@ void sse2_hash_insert_bulk(
     }
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_SSE2 */

@@ -5,7 +5,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* =========================================================================
  * Level configuration
@@ -524,4 +524,4 @@ size_t lz77_compress(
     return n_tokens;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

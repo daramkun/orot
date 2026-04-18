@@ -4,12 +4,11 @@
 #include <cstdint>
 #include "level_config.hpp"
 #include "../core/lz77.hpp"
-#include "../core/bit_writer.hpp"
 #include "../memory/arena.hpp"
 #include "../memory/aligned_alloc.hpp"
-#include "../../include/deflate/deflate_types.h"
+#include "../../include/orot/deflate_types.h"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * Streaming compressor state machine.
@@ -61,4 +60,4 @@ private:
     LZ77State*             lz77_state_ = nullptr;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

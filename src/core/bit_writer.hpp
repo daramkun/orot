@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /**
  * Bit-stream output using a 64-bit accumulator.
@@ -110,4 +110,4 @@ private:
     int            bit_count_ = 0;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

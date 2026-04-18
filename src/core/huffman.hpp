@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* ── Constants ───────────────────────────────────────────────────────────── */
 
@@ -121,4 +121,4 @@ extern const uint16_t LENGTH_BASE[29];
 extern const uint8_t DIST_EXTRA_BITS[30];
 extern const uint16_t DIST_BASE[30];
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

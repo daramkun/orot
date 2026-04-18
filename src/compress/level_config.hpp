@@ -4,7 +4,7 @@
 #include "../core/lz77.hpp"
 #include "../core/deflate_block.hpp"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 struct CompressConfig {
     LZ77Config     lz77;
@@ -27,4 +27,4 @@ inline CompressConfig compress_config_for_level(int level) {
     return c;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

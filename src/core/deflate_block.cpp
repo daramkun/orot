@@ -4,7 +4,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* =========================================================================
  * Helper: emit a Huffman symbol
@@ -473,4 +473,4 @@ size_t encode_block(
     return bw.bytes_written() - start;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

@@ -6,10 +6,6 @@
 extern "C" {
 #endif
 
-/* ── Version ─────────────────────────────────────────────────────────────── */
-uint32_t deflate_version(void);
-const char* deflate_version_string(void);
-
 /* ── Custom allocator (global, set before first use) ─────────────────────── */
 void deflate_set_allocator(const deflate_allocator* alloc);
 

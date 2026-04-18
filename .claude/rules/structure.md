@@ -1,9 +1,9 @@
-# deflate 프로젝트 구조
+# orot 프로젝트 구조
 
 ## 디렉토리 트리
 
 ```
-deflate/
+orot/
 ├── include/deflate/
 │   ├── deflate.h           # C API (whole-buffer, streaming, parallel)
 │   ├── deflate_types.h     # 에러코드, enum, allocator 인터페이스

@@ -5,7 +5,7 @@
 #include "../core/huffman.hpp"
 #include "../core/bit_reader.hpp"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * Decode table entry (32-bit packed):
@@ -65,4 +65,4 @@ bool inflate_fast(
     const uint8_t*       out_end,
     const InflateTables& tables);
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

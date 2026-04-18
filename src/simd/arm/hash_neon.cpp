@@ -1,11 +1,11 @@
-#include "../simd_dispatch.hpp"
-
 #if defined(DEFLATE_HAS_NEON)
+
+#include "../simd_dispatch.hpp"
 
 #include <arm_neon.h>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * NEON bulk hash insert.
@@ -64,6 +64,6 @@ void neon_hash_insert_bulk(
     }
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_NEON */

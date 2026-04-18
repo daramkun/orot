@@ -1,11 +1,11 @@
-#include "../simd_dispatch.hpp"
-
 #if defined(DEFLATE_HAS_AVX2)
+
+#include "../simd_dispatch.hpp"
 
 #include <immintrin.h>  /* AVX2 */
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * AVX2 bulk hash insert.
@@ -152,6 +152,6 @@ uint32_t avx2_adler32(uint32_t adler, const uint8_t* data, size_t len) {
     return (s2 << 16) | s1;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_AVX2 */

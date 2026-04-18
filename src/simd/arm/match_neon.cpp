@@ -1,11 +1,11 @@
-#include "../simd_dispatch.hpp"
-
 #if defined(DEFLATE_HAS_NEON)
+
+#include "../simd_dispatch.hpp"
 
 #include <arm_neon.h>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /*
  * NEON match length comparison.
@@ -83,6 +83,6 @@ int neon_match_length(const uint8_t* a, const uint8_t* b, int max_len) {
     return len;
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_NEON */

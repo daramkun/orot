@@ -4,7 +4,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* Code-length alphabet order (RFC 1951) */
 static const int CL_ORDER[CODELEN_SYMS] = {
@@ -557,4 +557,4 @@ loop:
 #undef PEEK_BITS
 #undef DROP_BITS
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

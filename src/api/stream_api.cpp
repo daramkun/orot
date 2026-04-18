@@ -1,4 +1,4 @@
-#include "deflate/deflate.h"
+#include "orot/deflate.h"
 #include "compress/compressor.hpp"
 #include "decompress/decompressor.hpp"
 #include "parallel/parallel_compressor.hpp"
@@ -61,8 +61,8 @@ struct deflate_stream {
     Kind kind;
 
     union {
-        deflate::Compressor*   compressor;
-        deflate::Decompressor* decompressor;
+        orot::deflate::Compressor*   compressor;
+        orot::deflate::Decompressor* decompressor;
     };
 
     deflate_format format;
@@ -99,7 +99,7 @@ struct deflate_stream {
 };
 
 struct deflate_parallel_ctx {
-    deflate::ParallelCompressor* impl;
+    orot::deflate::ParallelCompressor* impl;
     ~deflate_parallel_ctx() { delete impl; }
 };
 
@@ -136,7 +136,7 @@ deflate_stream* deflate_stream_new(int level, deflate_format format) {
     if (!s) return nullptr;
     s->kind       = deflate_stream::Kind::Compress;
     s->format     = format;
-    s->compressor = new (std::nothrow) deflate::Compressor(level);
+    s->compressor = new (std::nothrow) orot::deflate::Compressor(level);
     if (!s->compressor) { delete s; return nullptr; }
 
     /* RAW format: skip header/trailer entirely */
@@ -196,9 +196,9 @@ deflate_result deflate_stream_compress(
             const size_t consumed = in_before_avail - *avail_in;
             if (consumed > 0) {
                 if (s->format == DEFLATE_FORMAT_ZLIB)
-                    s->checksum_ = deflate::simd_adler32_fn()(s->checksum_, in_before, consumed);
+                    s->checksum_ = orot::deflate::simd_adler32_fn()(s->checksum_, in_before, consumed);
                 else if (s->format == DEFLATE_FORMAT_GZIP)
-                    s->checksum_ = deflate::simd_crc32_fn()(s->checksum_, in_before, consumed);
+                    s->checksum_ = orot::deflate::simd_crc32_fn()(s->checksum_, in_before, consumed);
                 s->total_out_ += static_cast<uint32_t>(consumed);
             }
 
@@ -255,7 +255,7 @@ deflate_stream* inflate_stream_new(deflate_format format) {
     if (!s) return nullptr;
     s->kind         = deflate_stream::Kind::Decompress;
     s->format       = format;
-    s->decompressor = new (std::nothrow) deflate::Decompressor;
+    s->decompressor = new (std::nothrow) orot::deflate::Decompressor;
     if (!s->decompressor) { delete s; return nullptr; }
 
     /* RAW: skip header/trailer */
@@ -319,9 +319,9 @@ deflate_result deflate_stream_decompress(
             const size_t produced = static_cast<size_t>(*next_out - out_before);
             if (produced > 0) {
                 if (s->format == DEFLATE_FORMAT_ZLIB)
-                    s->checksum_ = deflate::simd_adler32_fn()(s->checksum_, out_before, produced);
+                    s->checksum_ = orot::deflate::simd_adler32_fn()(s->checksum_, out_before, produced);
                 else if (s->format == DEFLATE_FORMAT_GZIP)
-                    s->checksum_ = deflate::simd_crc32_fn()(s->checksum_, out_before, produced);
+                    s->checksum_ = orot::deflate::simd_crc32_fn()(s->checksum_, out_before, produced);
                 s->total_out_ += static_cast<uint32_t>(produced);
             }
 
@@ -386,7 +386,7 @@ deflate_parallel_ctx* deflate_parallel_new(
 {
     auto* ctx = new (std::nothrow) deflate_parallel_ctx;
     if (!ctx) return nullptr;
-    ctx->impl = new (std::nothrow) deflate::ParallelCompressor(
+    ctx->impl = new (std::nothrow) orot::deflate::ParallelCompressor(
         level, format, num_threads, block_size);
     if (!ctx->impl) { delete ctx; return nullptr; }
     return ctx;

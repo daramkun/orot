@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /* ── Enums mirroring C types ─────────────────────────────────────────────── */
 
@@ -213,4 +213,4 @@ inline uint32_t crc32(std::span<const uint8_t> data, uint32_t init = 0) {
     return deflate_crc32(init, data.data(), data.size());
 }
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

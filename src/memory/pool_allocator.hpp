@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /**
  * Fixed-size slab allocator.
@@ -62,4 +62,4 @@ private:
     size_t used_      = 0;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */

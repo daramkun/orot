@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstdint>
+#include <cstddef>
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,16 +48,6 @@ typedef struct deflate_allocator {
     void  (*free )(void* opaque, void*  ptr);
     void* opaque;
 } deflate_allocator;
-
-/* ── Version ─────────────────────────────────────────────────────────────── */
-#define DEFLATE_VERSION_MAJOR 1
-#define DEFLATE_VERSION_MINOR 0
-#define DEFLATE_VERSION_PATCH 0
-
-#define DEFLATE_VERSION \
-    ((DEFLATE_VERSION_MAJOR << 16) | \
-     (DEFLATE_VERSION_MINOR <<  8) | \
-      DEFLATE_VERSION_PATCH)
 
 #ifdef __cplusplus
 } /* extern "C" */

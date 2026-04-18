@@ -1,4 +1,4 @@
-# DEFLATE 라이브러리 구현 계획
+# OROT (무손실 압축 라이브러리) 구현 계획
 
 ## 완료 현황
 
@@ -154,7 +154,7 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 ## 작업 1: 비교 벤치마크
 
 **파일**: `tests/bench/bench_compare.cpp`  
-**빌드 옵션**: `-DDEFLATE_COMPARE_BENCH=ON` (zlib + libdeflate 필요)
+**빌드 옵션**: `-DOROT_DEFLATE_COMPARE_BENCH=ON` (zlib + libdeflate 필요)
 
 ### 측정 지표
 - 압축/압축해제 처리량 (MB/s)
@@ -174,7 +174,7 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 ## 작업 2: 교차 호환성 테스트
 
 **파일**: `tests/compat/test_compat.cpp`  
-**빌드 옵션**: `-DDEFLATE_COMPAT_TEST=ON` (zlib + libdeflate 필요)
+**빌드 옵션**: `-DOROT_DEFLATE_COMPAT_TEST=ON` (zlib + libdeflate 필요)
 
 ### 테스트 매트릭스
 압축 × 압축해제 × 포맷(ZLIB, GZIP) 전체 조합.
@@ -200,12 +200,12 @@ Phase 상태머신 (HEADER→DATA→TRAILER→DONE) 구현:
 ctest --test-dir build --output-on-failure
 
 # 비교 벤치마크
-cmake -B build -DDEFLATE_TESTS=ON -DDEFLATE_COMPARE_BENCH=ON
+cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j
 ./build/tests/bench_compare
 
 # 호환성 테스트
-cmake -B build -DDEFLATE_TESTS=ON -DDEFLATE_COMPAT_TEST=ON
+cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j
 ./build/tests/test_compat
 ```

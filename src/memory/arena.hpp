@@ -7,7 +7,7 @@
 
 #include "aligned_alloc.hpp"
 
-namespace deflate {
+namespace orot { namespace deflate {
 
 /**
  * Linear bump allocator.
@@ -98,4 +98,4 @@ private:
     Arena                  arena_;
 };
 
-} /* namespace deflate */
+} } /* namespace orot::deflate */
