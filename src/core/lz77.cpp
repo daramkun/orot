@@ -124,6 +124,31 @@ static int match_find(
             continue;
         }
 
+        /* Adaptive-width early reject: widen the comparison as best_len grows.
+         * Checks bytes 0..N at the candidate start before calling the SIMD
+         * match function.  Unaligned loads are safe on x86/ARM. */
+        {
+            const uint8_t* cand = src + pos - dist;
+            const uint8_t* ref  = src + pos;
+            if (best_len >= 8 && pos + 7 < src_len) {
+                uint64_t cv, rv;
+                __builtin_memcpy(&cv, cand, 8);
+                __builtin_memcpy(&rv, ref,  8);
+                if (cv != rv) {
+                    cur = state.prev[cur & LZ77_WIN_MASK];
+                    continue;
+                }
+            } else if (best_len >= 4 && pos + 3 < src_len) {
+                uint32_t cv, rv;
+                __builtin_memcpy(&cv, cand, 4);
+                __builtin_memcpy(&rv, ref,  4);
+                if (cv != rv) {
+                    cur = state.prev[cur & LZ77_WIN_MASK];
+                    continue;
+                }
+            }
+        }
+
         /* Quick-reject at best_len offset: if the byte at that position doesn't
          * match, this candidate can't improve the current best — skip the SIMD
          * call.  Saves ~80-90% of match_len_fn() invocations during traversal.

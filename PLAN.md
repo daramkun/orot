@@ -26,6 +26,8 @@
 | inflate_fast 연결 (decompressor 상태머신 → inflate_fast fast path) | ✅ |
 | COPY_MATCH 벌크 복사 (circular window bulk memcpy, dist==1 memset) | ✅ |
 | LZ77 match_find() best_len 빠른 거부 체크 (SIMD 호출 80-90% 절감) | ✅ |
+| STORED_COPY window 업데이트 bulk 전환 (바이트 루프 → circular memcpy) | ✅ |
+| LZ77 match_find() 적응형 비교 폭 (best_len≥4→uint32, ≥8→uint64) | ✅ |
 
 ---
 
@@ -94,36 +96,37 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 | zlib | random (1MB) | fast | 38.8 | 8199.2 | 100.0% |
 | libdeflate | random (1MB) | fast | 96.4 | 18305.2 | 100.0% |
 
-### 최적화 후 2차 (inflate_fast 연결 + COPY_MATCH 벌크 + best_len 체크)
+### 최적화 후 3차 (STORED_COPY bulk + LZ77 적응형 비교폭)
 
 | 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
 |-----------|---------|------|-----------|-------------|--------|
-| ours | text (~90KB) | fast | 674.3 | 1023.5 | 2.1% |
-| zlib | text (~90KB) | fast | 848.6 | 3937.3 | 0.7% |
-| libdeflate | text (~90KB) | fast | 784.2 | 3278.3 | 0.4% |
-| ours | text (~90KB) | default | 272.9 | 1213.5 | 0.9% |
-| zlib | text (~90KB) | default | 372.8 | 3267.3 | 0.4% |
-| libdeflate | text (~90KB) | default | 645.8 | 4225.5 | 0.4% |
-| ours | zeros (1MB) | fast | 1337.0 | 1759.5 | 1.0% |
-| zlib | zeros (1MB) | fast | 635.8 | 6413.6 | 0.4% |
-| libdeflate | zeros (1MB) | fast | 1008.8 | 7955.9 | 0.1% |
-| ours | random (1MB) | fast | 337.7 | 263.0 | 100.0% |
-| zlib | random (1MB) | fast | 40.1 | 8239.4 | 100.0% |
-| libdeflate | random (1MB) | fast | 97.0 | 17883.5 | 100.0% |
+| ours | text (~90KB) | fast | 680.0 | 1075.4 | 2.1% |
+| zlib | text (~90KB) | fast | 826.5 | 5900.4 | 0.7% |
+| libdeflate | text (~90KB) | fast | 810.3 | 3556.0 | 0.4% |
+| ours | text (~90KB) | default | 264.0 | 1156.1 | 0.9% |
+| zlib | text (~90KB) | default | 364.0 | 3066.1 | 0.4% |
+| libdeflate | text (~90KB) | default | 626.0 | 4066.8 | 0.4% |
+| ours | zeros (1MB) | fast | 1357.4 | 1684.5 | 1.0% |
+| zlib | zeros (1MB) | fast | 627.9 | 6035.2 | 0.4% |
+| libdeflate | zeros (1MB) | fast | 967.8 | 7846.4 | 0.1% |
+| ours | random (1MB) | fast | 330.7 | 1733.3 | 100.0% |
+| zlib | random (1MB) | fast | 38.5 | 8061.6 | 100.0% |
+| libdeflate | random (1MB) | fast | 95.1 | 18322.6 | 100.0% |
 
 #### 압축 개선 요약 (vs 최초 기준)
 
 | 데이터셋 | 이전 | 이후 | 개선 |
 |---------|------|------|------|
-| text fast comp | 79.1 MB/s | 674.3 MB/s | +8.5x |
-| text fast decomp | 87.8 MB/s | 1023.5 MB/s | +11.7x |
-| zeros fast comp | 50.0 MB/s | 1337.0 MB/s | +26.7x |
-| zeros fast decomp | 93.7 MB/s | 1759.5 MB/s | +18.8x |
-| random fast comp | 10.3 MB/s | 337.7 MB/s | +32.8x |
+| text fast comp | 79.1 MB/s | 680.0 MB/s | +8.6x |
+| text fast decomp | 87.8 MB/s | 1075.4 MB/s | +12.2x |
+| zeros fast comp | 50.0 MB/s | 1357.4 MB/s | +27.1x |
+| zeros fast decomp | 93.7 MB/s | 1684.5 MB/s | +18.0x |
+| random fast comp | 10.3 MB/s | 330.7 MB/s | +32.1x |
+| random fast decomp | 124.8 MB/s | 1733.3 MB/s | +13.9x |
 
 > 압축률%: compressed/original×100 (낮을수록 좋음). 랜덤 데이터는 압축 불가(100%).  
-> 주요 변경: inflate_fast 연결 (decomp 11-19x), COPY_MATCH 벌크 (match-heavy 개선), best_len 체크 (comp 체인 탐색 절감).  
-> 잔존 격차: 압축해제 zlib 대비 3-4x, 압축 default 레벨 zlib 대비 1.4x.
+> 주요 변경: inflate_fast 연결 (decomp 12x), STORED_COPY bulk (random decomp 13.9x), LZ77 best_len+적응형 비교.  
+> 잔존 격차: Huffman decomp zlib 대비 3-4x (random/stored는 4.6x).
 
 ---
 

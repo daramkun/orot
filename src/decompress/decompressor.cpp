@@ -284,10 +284,7 @@ loop:
                 static_cast<size_t>(stored_len_ - stored_pos_),
                 std::min(avail_in, avail_out));
             std::memcpy(next_out, next_in, copy);
-            for (size_t k = 0; k < copy; ++k) {
-                window_.data()[win_pos_ & (WIN_SIZE - 1)] = next_in[k];
-                ++win_pos_;
-            }
+            sync_window_from_buf(next_in, copy);
             next_in    += copy; avail_in  -= copy;
             next_out   += copy; avail_out -= copy;
             stored_pos_ = static_cast<uint16_t>(stored_pos_ + static_cast<uint16_t>(copy));
@@ -329,7 +326,7 @@ loop:
                 /* Sync window_ with produced output for the fallback path. */
                 const size_t produced =
                     static_cast<size_t>(next_out - fast_out_start);
-                avail_out  -= produced;
+                avail_out -= produced;
                 sync_window_from_buf(fast_out_start, produced);
 
                 if (ended) {
