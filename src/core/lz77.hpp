@@ -58,19 +58,23 @@ LZ77Config lz77_config_for_level(int level);
 /* ── Hash chain state ────────────────────────────────────────────────────── */
 
 struct LZ77State {
-    /* head[hash] = most recent position for this hash value */
-    uint16_t head[LZ77_HASH_SIZE];
+    /* head[hash] = most recent position for this hash value (uint32_t to avoid
+     * uint16_t wrap-around sentinel poisoning for inputs > 64KB) */
+    uint32_t head[LZ77_HASH_SIZE];
     /* prev[pos & WIN_MASK] = previous chain pos / BT4 left child */
-    uint16_t prev[LZ77_WIN_SIZE];
+    uint32_t prev[LZ77_WIN_SIZE];
     /* bt_right[pos & WIN_MASK] = BT4 right child (only used when bt4=true) */
-    uint16_t bt_right[LZ77_WIN_SIZE];
+    uint32_t bt_right[LZ77_WIN_SIZE];
 
-    void reset(int hash_bits = LZ77_HASH_BITS) noexcept {
+    void reset(int hash_bits = LZ77_HASH_BITS, bool bt4 = false) noexcept {
         /* Zero only the portion of head[] used by the configured hash table.
-         * At L1-L3 (hash_bits=12/14) this is 8-32 KB instead of 128 KB. */
-        __builtin_memset(head, 0, sizeof(uint16_t) * (1u << hash_bits));
+         * At L1-L3 (hash_bits=12/14) this is 16-64 KB instead of 256 KB.
+         * bt_right is only needed for BT4 path (L10-12); skip the 256 KB
+         * zeroing for all other levels. */
+        __builtin_memset(head, 0, sizeof(uint32_t) * (1u << hash_bits));
         __builtin_memset(prev, 0, sizeof(prev));
-        __builtin_memset(bt_right, 0, sizeof(bt_right));
+        if (bt4)
+            __builtin_memset(bt_right, 0, sizeof(bt_right));
     }
 };
 

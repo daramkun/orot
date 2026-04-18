@@ -70,13 +70,18 @@ uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
         const uint8_t* p = data;
 
         while (p + 16 <= end) {
+            /* Cross-group: vs1 accumulates bytes from all prior groups;
+             * each of the 16 new bytes will add those prior bytes to s2.
+             * Equivalent to the scalar: s2 += s1 for each new byte (16 times). */
+            vs2 = vaddq_u32(vs2, vshlq_n_u32(vs1, 4));  /* vs2 += vs1 * 16 */
+
             uint8x16_t bytes = vld1q_u8(p);
-            /* s2 contribution per byte = byte * (remaining_count + weight) */
+            /* Within-group weighted s2: byte[i] contributes (16-i) times */
             uint16x8_t lo = vmull_u8(vget_low_u8 (bytes), vget_low_u8 (WEIGHTS));
             uint16x8_t hi = vmull_u8(vget_high_u8(bytes), vget_high_u8(WEIGHTS));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(lo), vget_high_u16(lo)));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(hi), vget_high_u16(hi)));
-            /* s1 contribution: simple sum */
+            /* s1: simple byte sum */
             uint16x8_t sum16 = vaddl_u8(vget_low_u8(bytes), vget_high_u8(bytes));
             vs1 = vaddq_u32(vs1,
                 vaddl_u16(vget_low_u16(sum16), vget_high_u16(sum16)));

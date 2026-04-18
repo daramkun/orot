@@ -78,9 +78,9 @@ void lz77_insert_dict(
     const size_t limit = dict_len - 3;  /* i + 4 <= dict_len → i < dict_len - 3 */
     for (size_t i = 0; i < limit; ++i) {
         const uint32_t h = lz77_hash4(dict + i) & LZ77_HASH_MASK;
-        const uint16_t pos = static_cast<uint16_t>(i & LZ77_WIN_MASK);
+        const uint32_t pos = static_cast<uint32_t>(i & LZ77_WIN_MASK);
         state.prev[pos] = state.head[h];
-        state.head[h]   = static_cast<uint16_t>(i);
+        state.head[h]   = static_cast<uint32_t>(i);
     }
 }
 
@@ -109,25 +109,25 @@ static int match_find(
     best_dist     = 0;
 
     const uint32_t h   = lz77_hash4(src + pos) & LZ77_HASH_MASK;
-    uint16_t cur       = state.head[h];
+    uint32_t cur       = state.head[h];
     int      steps     = cfg.max_chain;
-    /* Early-exit threshold: if no min-match found in first quarter of chain,
-     * the input is likely high-entropy and further traversal is wasteful. */
-    const int early_exit_steps = steps - std::max(4, steps >> 2);
+    /* Consecutive first-byte miss counter: if 8 candidates in a row fail the
+     * first-byte check, the chain is high-entropy and further traversal is
+     * wasteful.  8 is chosen to avoid false positives on structured data while
+     * cutting chain work to ≤8 steps for truly random input. */
+    int consec_misses  = 0;
 
     while (steps-- > 0 && cur != 0) {
-        /* High-entropy early exit: no match in first quarter of chain → give up. */
-        if (__builtin_expect(steps == early_exit_steps && best_len < LZ77_MIN_MATCH, 0))
-            break;
-
         const int dist = (pos - static_cast<int>(cur)) & LZ77_WIN_MASK;
         if (dist == 0 || dist > LZ77_WIN_SIZE) break;
 
         /* Quick first-byte check before full compare */
         if (src[cur] != src[pos]) {
+            if (__builtin_expect(++consec_misses >= 8, 0)) break;
             cur = state.prev[cur & LZ77_WIN_MASK];
             continue;
         }
+        consec_misses = 0;
 
         /* Adaptive-width early reject: widen the comparison as best_len grows.
          * Checks bytes 0..N at the candidate start before calling the SIMD
@@ -196,9 +196,9 @@ static inline int match_find_fast(
     const int max_match = std::min(LZ77_MAX_MATCH, src_len - pos);
 
     const uint32_t h    = lz77_hash4_n(src + pos, cfg.hash_bits);
-    const uint16_t cur  = state.head[h];
+    const uint32_t cur  = state.head[h];
     /* Update head immediately; fast path skips prev[] entirely */
-    state.head[h] = static_cast<uint16_t>(pos);
+    state.head[h] = static_cast<uint32_t>(pos);
 
     if (cur == 0) return 0;
 
@@ -216,7 +216,23 @@ static inline int match_find_fast(
 }
 
 /*
- * Insert position `pos` into hash chain (L4+ full path with prev[]).
+ * Insert position `pos` into hash chain (L4-9 standard path).
+ * Does NOT touch bt_right — that array is only needed for BT4 (L10-12).
+ * Skipping the bt_right write saves one store per covered position in the
+ * match coverage loop, which matters for long matches at high levels.
+ */
+static inline void hash_insert_chain(
+    const uint8_t* src, int pos, int src_len,
+    LZ77State& state)
+{
+    if (pos + 4 > src_len) return;
+    const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
+    state.prev[pos & LZ77_WIN_MASK] = state.head[h];
+    state.head[h] = static_cast<uint32_t>(pos);
+}
+
+/*
+ * Insert position `pos` into hash chain (L10-12 BT4 path with prev[]).
  * Also clears bt_right so BT4 traversal sees a clean node.
  */
 static inline void hash_insert(
@@ -227,7 +243,7 @@ static inline void hash_insert(
     const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
     state.prev[pos & LZ77_WIN_MASK] = state.head[h];
     state.bt_right[pos & LZ77_WIN_MASK] = 0;
-    state.head[h] = static_cast<uint16_t>(pos);
+    state.head[h] = static_cast<uint32_t>(pos);
 }
 
 /*
@@ -255,7 +271,7 @@ static int match_find_bt4(
             const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
             state.prev[pos & LZ77_WIN_MASK]     = state.head[h];
             state.bt_right[pos & LZ77_WIN_MASK] = 0;
-            state.head[h] = static_cast<uint16_t>(pos);
+            state.head[h] = static_cast<uint32_t>(pos);
         }
         return 0;
     }
@@ -264,14 +280,14 @@ static int match_find_bt4(
     best_dist     = 0;
 
     const uint32_t h = lz77_hash4(src + pos) & LZ77_HASH_MASK;
-    uint16_t cur     = state.head[h];
+    uint32_t cur     = state.head[h];
 
     /* Insert pos as new root immediately */
-    state.head[h] = static_cast<uint16_t>(pos);
+    state.head[h] = static_cast<uint32_t>(pos);
 
     /* Pointers to the left/right child slots of the new node (pos) */
-    uint16_t* pleft  = &state.prev[pos & LZ77_WIN_MASK];
-    uint16_t* pright = &state.bt_right[pos & LZ77_WIN_MASK];
+    uint32_t* pleft  = &state.prev[pos & LZ77_WIN_MASK];
+    uint32_t* pright = &state.bt_right[pos & LZ77_WIN_MASK];
 
     /* Known match lengths from the tree walk:
      * len_left  = how many bytes already match when descending into left subtree
@@ -280,18 +296,41 @@ static int match_find_bt4(
     int len_right = 0;
 
     int steps = cfg.max_chain;
-    /* Early exit: give up if no MIN_MATCH found after first half of chain */
-    const int early_exit_threshold = steps - std::max(4, steps >> 1);
+    /* Consecutive first-byte miss counter: BT4 still must navigate the tree
+     * even on misses (to maintain structural correctness), but we abort after
+     * 8 consecutive misses since the chain is high-entropy. */
+    int consec_misses = 0;
 
     while (steps-- > 0 && cur != 0) {
-        /* High-entropy early exit for BT4: first 50% of budget, no match → give up */
-        if (__builtin_expect(steps == early_exit_threshold && best_len < LZ77_MIN_MATCH, 0))
-            break;
-
         const int dist = (pos - static_cast<int>(cur)) & LZ77_WIN_MASK;
         if (dist == 0 || dist > LZ77_WIN_SIZE) break;
 
         const uint8_t* cand = src + pos - dist;
+
+        /* Fast first-byte check: if mismatch, navigate tree without calling
+         * the full match function, and count consecutive misses. */
+        if (cand[0] != src[pos]) {
+            if (__builtin_expect(++consec_misses >= 8, 0)) {
+                *pleft = 0; *pright = 0;
+                return best_len;
+            }
+            /* Still must navigate tree to maintain BT4 structure */
+            if (pos + 0 < src_len && (pos - dist) < src_len
+                && cand[0] < src[pos])
+            {
+                *pleft = cur;
+                pleft  = &state.bt_right[cur & LZ77_WIN_MASK];
+                cur    = state.bt_right[cur & LZ77_WIN_MASK];
+                len_left = 0;
+            } else {
+                *pright = cur;
+                pright  = &state.prev[cur & LZ77_WIN_MASK];
+                cur     = state.prev[cur & LZ77_WIN_MASK];
+                len_right = 0;
+            }
+            continue;
+        }
+        consec_misses = 0;
 
         /* Start from already-known prefix minimum */
         const int skip = std::min(len_left, len_right);
@@ -381,11 +420,14 @@ size_t lz77_compress(
                 out[n_tokens++] = Token::match(
                     static_cast<uint16_t>(best_len),
                     static_cast<uint16_t>(best_dist));
-                /* Insert pos+1 into hash before skipping (improves ratio at near-zero cost). */
-                if (pos + 1 + 4 <= isrc_len)
-                    state.head[lz77_hash4_n(src + pos + 1, cfg.hash_bits)] =
-                        static_cast<uint16_t>(pos + 1);
-                pos += best_len;
+                /* Insert all covered positions into head[] so that future searches
+                 * can find nearby matches for repeating patterns.  No prev[] update
+                 * needed: fast_path is head-only (max_chain=1). */
+                const int match_end = pos + best_len;
+                for (int i = pos + 1; i < match_end && i + 4 <= isrc_len; ++i)
+                    state.head[lz77_hash4_n(src + i, cfg.hash_bits)] =
+                        static_cast<uint32_t>(i);
+                pos = match_end;
             }
         }
     } else if (cfg.bt4) {
@@ -468,10 +510,12 @@ size_t lz77_compress(
                     static_cast<uint16_t>(best_len),
                     static_cast<uint16_t>(best_dist));
 
-                /* Insert all positions covered by the match */
+                /* Insert all positions covered by the match.
+                 * Use hash_insert_chain (no bt_right clear) — bt_right is
+                 * only needed for the BT4 path (L10-12). */
                 const int end = pos + best_len;
                 for (int i = pos; i < end && i + LZ77_MIN_MATCH <= isrc_len; ++i)
-                    hash_insert(src, i, isrc_len, state);
+                    hash_insert_chain(src, i, isrc_len, state);
                 pos = end;
             }
         }
