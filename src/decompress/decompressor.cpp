@@ -29,6 +29,26 @@ void Decompressor::reset() {
     arena_.reset();
     tables_ = arena_.alloc<InflateTables>();
     std::memset(window_.data(), 0, WIN_SIZE);
+    out_origin_       = nullptr;
+    out_expected_end_ = nullptr;
+}
+
+/*
+ * Append `len` bytes from `buf` into the circular window_ at win_pos_.
+ * Used after inflate_fast to keep window_ coherent for the fallback path.
+ */
+void Decompressor::sync_window_from_buf(const uint8_t* buf, size_t len) noexcept {
+    if (len == 0) return;
+    if (len > WIN_SIZE) {
+        buf += len - WIN_SIZE;
+        len  = WIN_SIZE;
+    }
+    const size_t dst = win_pos_ & (WIN_SIZE - 1);
+    const size_t first = std::min(len, WIN_SIZE - dst);
+    std::memcpy(window_.data() + dst, buf, first);
+    if (first < len)
+        std::memcpy(window_.data(), buf + first, len - first);
+    win_pos_ += len;
 }
 
 bool Decompressor::build_tables_from_combined() {
@@ -73,6 +93,19 @@ deflate_result Decompressor::decompress(
 
     if (state_ == State::DONE)  return DEFLATE_STREAM_END;
     if (state_ == State::ERROR) return DEFLATE_DATA_ERROR;
+
+    /* Track contiguous output buffer for inflate_fast back-reference resolution. */
+    const bool out_contiguous =
+        (out_origin_ != nullptr) && (next_out == out_expected_end_);
+    if (out_origin_ == nullptr || !out_contiguous) {
+        out_origin_ = next_out;
+    }
+    /* RAII: update out_expected_end_ on every return path. */
+    struct OutEndTracker {
+        uint8_t*& expected;
+        uint8_t*& cur;
+        ~OutEndTracker() { expected = cur; }
+    } out_tracker{out_expected_end_, next_out};
 
 loop:
     switch (state_) {
@@ -266,6 +299,49 @@ loop:
 
     /* ── Huffman decode ───────────────────────────────────────────────── */
     case State::DECODE_LITLEN: {
+        /* Fast path: hand off to inflate_fast when:
+         *  - enough raw input for safe 8-byte bulk refills
+         *  - enough output headroom for the longest possible match (258 bytes)
+         *  - all history (up to WIN_SIZE bytes) is accessible in the contiguous
+         *    output buffer [out_origin_, next_out), so inflate_fast can resolve
+         *    back-references without consulting window_[]
+         * After inflate_fast, sync window_ so the slow-path fallback works.
+         */
+        if (out_origin_ != nullptr && avail_in >= 10 && avail_out >= 258) {
+            const size_t history_avail =
+                static_cast<size_t>(next_out - out_origin_);
+            if (history_avail >= std::min(win_pos_, WIN_SIZE)) {
+                uint8_t* const fast_out_start = next_out;
+                BitReader br(next_in, avail_in, bits_, bit_count_);
+
+                const bool ended =
+                    inflate_fast(br, const_cast<uint8_t*>(out_origin_),
+                                 next_out, next_out + avail_out, *tables_);
+
+                /* Sync raw input state back. */
+                const size_t in_consumed =
+                    static_cast<size_t>(br.current_ptr() - next_in);
+                next_in    += in_consumed;
+                avail_in   -= in_consumed;
+                bits_       = br.raw_bits();
+                bit_count_  = br.raw_bit_count();
+
+                /* Sync window_ with produced output for the fallback path. */
+                const size_t produced =
+                    static_cast<size_t>(next_out - fast_out_start);
+                avail_out  -= produced;
+                sync_window_from_buf(fast_out_start, produced);
+
+                if (ended) {
+                    if (is_final_) { state_ = State::DONE; return DEFLATE_STREAM_END; }
+                    state_ = State::BLOCK_HEADER;
+                    goto loop;
+                }
+                /* inflate_fast exited due to output/input margin: fall through
+                 * to slow path for remaining symbols in this block. */
+            }
+        }
+
         while (avail_out > 0) {
             /* Fill bit buffer; near end-of-stream last symbol may be shorter
              * than LITLEN_DECODE_BITS so we cannot require a full refill. */
@@ -363,14 +439,51 @@ loop:
 
     case State::COPY_MATCH: {
         while (match_len_ > 0 && avail_out > 0) {
-            const size_t  back    = static_cast<size_t>(match_dist_);
-            const size_t  src_pos = (win_pos_ - back) & (WIN_SIZE - 1);
-            const uint8_t byte    = window_.data()[src_pos];
-            *next_out++ = byte;
-            --avail_out;
-            window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
-            ++win_pos_;
-            --match_len_;
+            const size_t back = static_cast<size_t>(match_dist_);
+            const size_t len  = std::min(static_cast<size_t>(match_len_), avail_out);
+
+            if (back == 1) {
+                /* Single-byte RLE: memset the repeated byte. */
+                const uint8_t byte = window_.data()[(win_pos_ - 1) & (WIN_SIZE - 1)];
+                std::memset(next_out, byte, len);
+                /* Update circular window. */
+                const size_t dst = win_pos_ & (WIN_SIZE - 1);
+                const size_t f   = std::min(len, WIN_SIZE - dst);
+                std::memset(window_.data() + dst, byte, f);
+                if (f < len) std::memset(window_.data(), byte, len - f);
+                next_out   += len;
+                avail_out  -= len;
+                win_pos_   += len;
+                match_len_ -= static_cast<int>(len);
+            } else if (back >= len) {
+                /* Non-overlapping: safe to bulk-copy from window → out. */
+                const size_t src = (win_pos_ - back) & (WIN_SIZE - 1);
+                /* Read from circular window (may wrap). */
+                const size_t f1 = std::min(len, WIN_SIZE - src);
+                std::memcpy(next_out, window_.data() + src, f1);
+                if (f1 < len)
+                    std::memcpy(next_out + f1, window_.data(), len - f1);
+                /* Write produced bytes into circular window. */
+                const size_t dst = win_pos_ & (WIN_SIZE - 1);
+                const size_t f2  = std::min(len, WIN_SIZE - dst);
+                std::memcpy(window_.data() + dst, next_out, f2);
+                if (f2 < len)
+                    std::memcpy(window_.data(), next_out + f2, len - f2);
+                next_out   += len;
+                avail_out  -= len;
+                win_pos_   += len;
+                match_len_ -= static_cast<int>(len);
+            } else {
+                /* Overlapping (back < len): copy byte-at-a-time so each new
+                 * byte is immediately available as a source for the next. */
+                const size_t  src_pos = (win_pos_ - back) & (WIN_SIZE - 1);
+                const uint8_t byte    = window_.data()[src_pos];
+                *next_out++ = byte;
+                --avail_out;
+                window_.data()[win_pos_ & (WIN_SIZE - 1)] = byte;
+                ++win_pos_;
+                --match_len_;
+            }
         }
         if (match_len_ > 0) return DEFLATE_NEED_OUTPUT;
         state_ = State::DECODE_LITLEN;

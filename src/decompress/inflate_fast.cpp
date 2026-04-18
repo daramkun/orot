@@ -76,8 +76,8 @@ bool inflate_fast(
         }
 
         if (sym == 256) {
-            /* End-of-block */
-            return false;
+            /* End-of-block: signal caller that the block is complete. */
+            return true;
         }
 
         /* Length code (sym 257-285) */

@@ -44,7 +44,9 @@ struct InflateTables {
  *   - out_ptr + 258 <= out_end  (max copy)
  *   - in_ptr  + 10  <= in_end   (enough bits)
  *
- * Returns false when EOB symbol encountered or conditions no longer safe.
+ * Returns true when EOB symbol encountered (block complete).
+ * Returns false when conditions are no longer safe (output/input margin exhausted)
+ * without having seen EOB — caller should continue with the slow path.
  * Updates in_ptr/out_ptr in place.
  *
  * br:        bit reader (updated in place)

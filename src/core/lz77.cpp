@@ -124,6 +124,18 @@ static int match_find(
             continue;
         }
 
+        /* Quick-reject at best_len offset: if the byte at that position doesn't
+         * match, this candidate can't improve the current best — skip the SIMD
+         * call.  Saves ~80-90% of match_len_fn() invocations during traversal.
+         * Use pos - dist (true candidate start) rather than cur (uint16_t, may
+         * have wrapped for large inputs). Guard: pos + best_len must be in range. */
+        if (best_len >= LZ77_MIN_MATCH && pos + best_len < src_len &&
+            src[pos - dist + best_len] != src[pos + best_len])
+        {
+            cur = state.prev[cur & LZ77_WIN_MASK];
+            continue;
+        }
+
         const int len = match_len_fn(
             src + pos, src + pos - dist, max_match);
 

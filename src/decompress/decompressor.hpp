@@ -82,8 +82,13 @@ private:
     int      match_len_  = 0;
     int      match_dist_ = 0;
 
+    /* inflate_fast integration: track contiguous output buffer across calls */
+    const uint8_t* out_origin_       = nullptr; // start of first output buffer
+    uint8_t*       out_expected_end_ = nullptr; // expected next_out at next call start
+
     /* Helpers */
     bool build_tables_from_combined();
+    void sync_window_from_buf(const uint8_t* buf_start, size_t len) noexcept;
 };
 
 } /* namespace deflate */

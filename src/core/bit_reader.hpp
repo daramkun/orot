@@ -22,6 +22,12 @@ public:
     BitReader(const uint8_t* src, size_t size) noexcept
         : src_(src), end_(src + size), ptr_(src) {}
 
+    /* Constructor with pre-loaded bit state (for handing off from a state machine). */
+    BitReader(const uint8_t* src, size_t size,
+              uint64_t preloaded_bits, int preloaded_count) noexcept
+        : src_(src), end_(src + size), ptr_(src)
+        , bits_(preloaded_bits), bit_count_(preloaded_count) {}
+
     /* ── Refill ──────────────────────────────────────────────────────────── */
 
     /**
@@ -108,6 +114,10 @@ public:
 
     const uint8_t* current_ptr() const noexcept { return ptr_; }
     const uint8_t* end_ptr()     const noexcept { return end_; }
+
+    /* Raw bit accumulator state — for syncing back to an external state machine. */
+    uint64_t raw_bits()       const noexcept { return bits_; }
+    int      raw_bit_count()  const noexcept { return bit_count_; }
 
     /** True when >= 8 bytes of raw input remain (safe for refill_fast). */
     bool can_refill_fast() const noexcept { return ptr_ + 8 <= end_; }
