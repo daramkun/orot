@@ -199,14 +199,14 @@ void encode_code_lengths(
     BitWriter& bw)
 {
     /* Merge litlen and dist lens into one sequence */
-    static uint8_t combined[LITLEN_SYMS + DIST_SYMS];
+    uint8_t combined[LITLEN_SYMS + DIST_SYMS];
     std::memcpy(combined,              litlen_lens, static_cast<size_t>(litlen_count));
     std::memcpy(combined + litlen_count, dist_lens, static_cast<size_t>(dist_count));
     const int total = litlen_count + dist_count;
 
     /* Run-length encode */
-    static uint8_t  rle_sym [LITLEN_SYMS + DIST_SYMS];
-    static uint8_t  rle_xtra[LITLEN_SYMS + DIST_SYMS];
+    uint8_t  rle_sym [LITLEN_SYMS + DIST_SYMS];
+    uint8_t  rle_xtra[LITLEN_SYMS + DIST_SYMS];
     int n_rle = 0;
 
     for (int i = 0; i < total; ) {

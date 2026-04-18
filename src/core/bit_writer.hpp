@@ -26,9 +26,18 @@ public:
     /** Write the low `count` bits of `value`. count must be 1..32. */
     void write_bits(uint32_t value, int count) noexcept {
         assert(count > 0 && count <= 32);
-        bits_   |= (static_cast<uint64_t>(value) & ((1ULL << count) - 1)) << bit_count_;
+        assert(bit_count_ + count <= 64);
+        bits_      |= (static_cast<uint64_t>(value) & ((1ULL << count) - 1)) << bit_count_;
         bit_count_ += count;
-        flush_full_bytes();
+        /* Flush exactly 4 bytes when the accumulator has at least 32 bits.
+         * Fixed-size store is cheaper than the variable-length flush. */
+        if (bit_count_ >= 32) {
+            assert(ptr_ + 4 <= dst_ + cap_);
+            std::memcpy(ptr_, &bits_, 4);
+            ptr_       += 4;
+            bits_      >>= 32;
+            bit_count_ -= 32;
+        }
     }
 
     /** Write a single bit (0 or 1). */
@@ -59,7 +68,9 @@ public:
     /** Write raw bytes (must be byte-aligned first). */
     void write_bytes(const uint8_t* src, size_t len) noexcept {
         if (len == 0) return;
-        assert(bit_count_ == 0 && "must be byte-aligned before write_bytes");
+        assert((bit_count_ & 7) == 0 && "must be byte-aligned before write_bytes");
+        flush_full_bytes();  /* drain any buffered complete bytes first */
+        assert(bit_count_ == 0);
         assert(ptr_ + len <= dst_ + cap_);
         std::memcpy(ptr_, src, len);
         ptr_ += len;
@@ -83,14 +94,13 @@ public:
 
 private:
     void flush_full_bytes() noexcept {
-        /* Flush as many full bytes as possible */
-        const int full = bit_count_ >> 3;
-        if (full == 0) return;
-        assert(ptr_ + full <= dst_ + cap_);
-        std::memcpy(ptr_, &bits_, static_cast<size_t>(full));
-        ptr_       += full;
-        bits_      >>= (full << 3);
-        bit_count_ -= (full << 3);
+        /* Drain any remaining full bytes (used by flush() only). */
+        while (bit_count_ >= 8) {
+            assert(ptr_ + 1 <= dst_ + cap_);
+            *ptr_++ = static_cast<uint8_t>(bits_);
+            bits_      >>= 8;
+            bit_count_  -= 8;
+        }
     }
 
     uint8_t* const dst_;
