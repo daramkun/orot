@@ -45,6 +45,10 @@
 | D-5: 디코드 테이블 HUFF_LITERAL_FLAG (bit[24]) — sym<256 비교 → 비트 테스트 전환 | ✅ |
 | D-6: HUFF_SUBTABLE_FLAG bit[24]→bit[25] 이동 (HUFF_LITERAL_FLAG와 구분) | ✅ |
 | D-7: inflate_fast NEON 1+3 투기적 리터럴 배치 (ebits0 stride, OOO 병렬 load) | ✅ |
+| C-1: LITLEN_DECODE_BITS 9→11 (8KB primary table, 2차 테이블 조회 감소) | ✅ |
+| C-2: 128-bit 비트 어큐뮬레이터 + 1+8 NEON/x86 리터럴 배치 디코드 | ✅ |
+| C-3: copy_match NEON 64/128-byte + SSE2 32-byte non-overlapping 확장 | ✅ |
+| C-4: 멀티멤버 gzip 병렬 압축해제 (parallel_gzip_decompress, ThreadPool 재사용) | ✅ |
 
 ---
 
