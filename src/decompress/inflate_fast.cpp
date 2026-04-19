@@ -31,13 +31,15 @@ static inline void copy_match(
     uint8_t* out, size_t dist, size_t len) noexcept
 {
 #if defined(DEFLATE_HAS_NEON)
-    if (__builtin_expect(len <= 32 && dist >= 32, 1)) {
-        vst1q_u8(out,      vld1q_u8(out - dist));
-        vst1q_u8(out + 16, vld1q_u8(out - dist + 16));
-        return;
-    }
+    /* Most common: short match, large enough distance — single 128-bit op */
     if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
         vst1q_u8(out, vld1q_u8(out - dist));
+        return;
+    }
+    /* Medium match, guaranteed non-overlapping — two 128-bit ops */
+    if (__builtin_expect(len <= 32 && dist >= 32, 0)) {
+        vst1q_u8(out,      vld1q_u8(out - dist));
+        vst1q_u8(out + 16, vld1q_u8(out - dist + 16));
         return;
     }
 #elif defined(DEFLATE_HAS_SSE2)
@@ -114,8 +116,6 @@ bool inflate_fast(
         {
             uint64_t word;
             std::memcpy(&word, src, 8);
-            /* Prefetch compressed input ~3 refills ahead to hide load latency. */
-            __builtin_prefetch(src + 24, 0, 0);
             bits    |= word << bit_cnt;
             int nb   = (63 - bit_cnt) >> 3;
             src     += nb;
