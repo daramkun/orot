@@ -5,6 +5,8 @@
 
 #if defined(DEFLATE_HAS_NEON)
 #include <arm_neon.h>
+#elif defined(DEFLATE_HAS_SSE2)
+#include <emmintrin.h>
 #endif
 
 namespace orot { namespace deflate {
@@ -26,6 +28,9 @@ static inline void copy_match(
     if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
 #if defined(DEFLATE_HAS_NEON)
         vst1q_u8(out, vld1q_u8(out - dist));
+#elif defined(DEFLATE_HAS_SSE2)
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out),
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(out - dist)));
 #else
         uint64_t w0, w1;
         std::memcpy(&w0, out - dist,     8);
@@ -182,7 +187,38 @@ decode_symbol:;
                     continue;
                 }
             }
-#endif /* DEFLATE_HAS_NEON */
+#elif defined(DEFLATE_HAS_SSE2)
+            if (__builtin_expect(
+                    !had_secondary &&
+                    (e0 & HUFF_LITERAL_FLAG) &&
+                    bit_cnt >= 4 * LITLEN_DECODE_BITS,
+                    1)) {
+                static constexpr uint32_t MASK9 = (1u << LITLEN_DECODE_BITS) - 1;
+                const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)       & MASK9];
+                const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0)) & MASK9];
+                const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0)) & MASK9];
+
+                const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
+                const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
+                if (__builtin_expect(
+                        ((e1 & CHECK) == OK) &
+                        ((e2 & CHECK) == OK) &
+                        ((e3 & CHECK) == OK),
+                        1)) {
+                    out[0] = static_cast<uint8_t>(e0);
+                    out[1] = static_cast<uint8_t>(e1);
+                    out[2] = static_cast<uint8_t>(e2);
+                    out[3] = static_cast<uint8_t>(e3);
+                    out     += 4;
+                    bits    >>= 4 * ebits0;
+                    bit_cnt -=  4 * ebits0;
+                    if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                    if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                        goto decode_symbol;
+                    continue;
+                }
+            }
+#endif /* DEFLATE_HAS_NEON / DEFLATE_HAS_SSE2 */
 
             /* Scalar fallback: consume e0's bits and handle it alone. */
             bits    >>= ebits0;

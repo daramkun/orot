@@ -75,6 +75,7 @@ void     neon_hash_insert_bulk(
 
 #if defined(DEFLATE_HAS_SSE42)
 int      sse42_match_length  (const uint8_t* a, const uint8_t* b, int max_len);
+uint32_t sse42_crc32         (uint32_t crc,   const uint8_t* data, size_t len);
 #endif
 
 #if defined(DEFLATE_HAS_AVX2)

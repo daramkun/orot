@@ -92,6 +92,7 @@ static SIMDDispatch build_dispatch() {
 
 #if defined(DEFLATE_HAS_SSE42)
     d.match_length    = sse42_match_length;
+    d.crc32           = sse42_crc32;
 #endif
 #if defined(DEFLATE_HAS_AVX2)
     d.adler32         = avx2_adler32;

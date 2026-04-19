@@ -18,6 +18,11 @@ function(deflate_set_compiler_flags target)
             $<$<CONFIG:Debug>:-O0 -g>
             -Wall -Wextra -Wno-unused-parameter
         )
+        if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+            target_compile_options(${target} PRIVATE -mcpu=apple-m1)
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+            target_compile_options(${target} PRIVATE -march=armv8-a+crc+simd)
+        endif()
     endif()
 
     # LTO for release builds

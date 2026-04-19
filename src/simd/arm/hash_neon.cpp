@@ -59,10 +59,8 @@ void neon_hash_insert_bulk(
         for (int j = 0; j < 8; ++j)
             h[j] = (h[j] >> shift) & hash_mask;
 
-#if !defined(__APPLE__)
         for (int j = 0; j < 8; ++j)
-            __builtin_prefetch(&head[h[j]], 0, 1);
-#endif
+            __builtin_prefetch(&head[h[j]], 0, 0);
 
         /* Read old head values into aligned buffer for contiguous prev[] store. */
         alignas(16) uint16_t old_head[8];

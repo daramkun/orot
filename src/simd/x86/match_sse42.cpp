@@ -73,6 +73,31 @@ int sse42_match_length(const uint8_t* a, const uint8_t* b, int max_len) {
     return len;
 }
 
+uint32_t sse42_crc32(uint32_t crc, const uint8_t* data, size_t len) {
+    uint64_t c = ~(uint64_t)crc;
+    while (len >= 32) {
+        uint64_t w0, w1, w2, w3;
+        std::memcpy(&w0, data +  0, 8);
+        std::memcpy(&w1, data +  8, 8);
+        std::memcpy(&w2, data + 16, 8);
+        std::memcpy(&w3, data + 24, 8);
+        c = _mm_crc32_u64(c, w0);
+        c = _mm_crc32_u64(c, w1);
+        c = _mm_crc32_u64(c, w2);
+        c = _mm_crc32_u64(c, w3);
+        data += 32; len -= 32;
+    }
+    while (len >= 8) {
+        uint64_t w;
+        std::memcpy(&w, data, 8);
+        c = _mm_crc32_u64(c, w);
+        data += 8; len -= 8;
+    }
+    while (len--)
+        c = _mm_crc32_u8(static_cast<uint32_t>(c), *data++);
+    return static_cast<uint32_t>(~c);
+}
+
 } } /* namespace orot::deflate */
 
 #endif /* DEFLATE_HAS_SSE42 */
