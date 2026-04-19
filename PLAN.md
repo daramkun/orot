@@ -44,6 +44,7 @@
 | D-4: LZ77 체인 탐색 고엔트로피 early-exit (max_chain/4 단계 후 min-match 없으면 종료) | ✅ |
 | D-5: 디코드 테이블 HUFF_LITERAL_FLAG (bit[24]) — sym<256 비교 → 비트 테스트 전환 | ✅ |
 | D-6: HUFF_SUBTABLE_FLAG bit[24]→bit[25] 이동 (HUFF_LITERAL_FLAG와 구분) | ✅ |
+| D-7: inflate_fast NEON 1+3 투기적 리터럴 배치 (ebits0 stride, OOO 병렬 load) | ✅ |
 
 ---
 
