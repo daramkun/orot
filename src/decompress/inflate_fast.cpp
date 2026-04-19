@@ -113,42 +113,92 @@ bool inflate_fast(
          */
 decode_symbol:;
         {
-            uint32_t entry = tables.litlen[static_cast<uint32_t>(bits) & ((1u << LITLEN_DECODE_BITS) - 1)];
+            uint32_t e0 = tables.litlen[static_cast<uint32_t>(bits) & ((1u << LITLEN_DECODE_BITS) - 1)];
 
-            if (__builtin_expect(entry & HUFF_SUBTABLE_FLAG, 0)) {
+            /* Track whether secondary lookup is needed so NEON batch can skip it. */
+            const bool had_secondary = !!(e0 & HUFF_SUBTABLE_FLAG);
+            if (__builtin_expect(had_secondary, 0)) {
                 /* Secondary table lookup (codes > LITLEN_DECODE_BITS bits).
                  * Extract secondary index WITHOUT consuming primary bits first —
                  * shift right by LITLEN_DECODE_BITS to see beyond the primary.
                  * Then the final `bits >>= ebits` below consumes the FULL code
                  * length in one step, avoiding the double-consume bug
                  * (consume_primary + consume_full_len = primary + full ≠ full). */
-                const int sec_bits   = static_cast<int>((entry >> 16) & 0xFF);
-                const int sec_offset = static_cast<int>(entry & 0xFFFF);
-                entry = tables.litlen[sec_offset +
+                const int sec_bits   = static_cast<int>((e0 >> 16) & 0xFF);
+                const int sec_offset = static_cast<int>(e0 & 0xFFFF);
+                e0 = tables.litlen[sec_offset +
                     ((static_cast<uint32_t>(bits) >> LITLEN_DECODE_BITS) & ((1u << sec_bits) - 1))];
             }
 
-            const int ebits = static_cast<int>((entry >> 16) & 0xFF);
-            bits    >>= ebits;
-            bit_cnt -= ebits;
+            const int ebits0 = static_cast<int>((e0 >> 16) & 0xFF);
 
-            if (__builtin_expect(entry & HUFF_LITERAL_FLAG, 1)) {
+#if defined(DEFLATE_HAS_NEON)
+            /*
+             * 1+3 speculative NEON literal batch.
+             *
+             * We already have e0 (correct, on the dep chain).  Using e0's actual
+             * code length (ebits0) as a stride, speculatively compute three more
+             * primary-table indices — all independent of each other and of future
+             * bit consumption.  The OOO core can issue these three loads in parallel
+             * while we wait for nothing.  NEON then verifies in a single pass that
+             * all three are primary literals with the same code length.
+             *
+             * Condition: e0 was a primary entry (no secondary needed), is a literal,
+             * and bit_cnt >= 4*LITLEN_DECODE_BITS (= 36, covers ebits0 <= 9).
+             */
+            if (__builtin_expect(
+                    !had_secondary &&
+                    (e0 & HUFF_LITERAL_FLAG) &&
+                    bit_cnt >= 4 * LITLEN_DECODE_BITS,
+                    1)) {
+                static constexpr uint32_t MASK9 = (1u << LITLEN_DECODE_BITS) - 1;
+                const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)         & MASK9];
+                const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0))   & MASK9];
+                const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0))   & MASK9];
+
+                /* Verify e1,e2,e3: LITERAL set, SUBTABLE clear, ebits == ebits0.
+                 * Slot arr4[3] = OK so the 4th NEON lane always passes (3 real checks). */
+                const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
+                const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
+                alignas(16) const uint32_t arr4[4] = {e1, e2, e3, OK};
+                const uint32x4_t ev  = vld1q_u32(arr4);
+                const uint32x4_t cmp = vceqq_u32(vandq_u32(ev, vdupq_n_u32(CHECK)),
+                                                  vdupq_n_u32(OK));
+                const uint64x2_t c64 = vreinterpretq_u64_u32(cmp);
+
+                if (__builtin_expect(
+                        (vgetq_lane_u64(c64, 0) & vgetq_lane_u64(c64, 1)) == UINT64_MAX,
+                        1)) {
+                    out[0] = static_cast<uint8_t>(e0);
+                    out[1] = static_cast<uint8_t>(e1);
+                    out[2] = static_cast<uint8_t>(e2);
+                    out[3] = static_cast<uint8_t>(e3);
+                    out     += 4;
+                    bits    >>= 4 * ebits0;
+                    bit_cnt -=  4 * ebits0;
+                    if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                    if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                        goto decode_symbol;
+                    continue;
+                }
+            }
+#endif /* DEFLATE_HAS_NEON */
+
+            /* Scalar fallback: consume e0's bits and handle it alone. */
+            bits    >>= ebits0;
+            bit_cnt -= ebits0;
+
+            if (__builtin_expect(e0 & HUFF_LITERAL_FLAG, 1)) {
                 /* Literal — most common path; sym in bits[7:0] */
-                *out++ = static_cast<uint8_t>(entry);
+                *out++ = static_cast<uint8_t>(e0);
                 if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                /*
-                 * If we still have enough bits for a primary-table lookup,
-                 * skip the refill and decode the next symbol immediately.
-                 * This avoids one 8-byte load per literal on consecutive-
-                 * literal runs, which is the dominant case for text data.
-                 */
                 if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
                     goto decode_symbol;
                 continue;
             }
 
             {
-                const int sym = static_cast<int>(entry & 0xFFFF);
+                const int sym = static_cast<int>(e0 & 0xFFFF);
 
                 if (sym == 256) {
                     /* End-of-block */
