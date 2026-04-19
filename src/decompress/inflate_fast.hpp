@@ -26,9 +26,11 @@ static constexpr int LITLEN_TABLE_SIZE = 1 << LITLEN_DECODE_BITS;
 static constexpr int DIST_TABLE_SIZE   = 1 << DIST_DECODE_BITS;
 
 /* Max secondary table entries.
- * With 11-bit primary, only codes 12-15 bits go to secondary. */
+ * With 11-bit primary for both litlen and dist:
+ *   litlen: only codes 12-15 bits go to secondary.
+ *   dist:   codes 0-29 max 13 bits; 12-13 bits go to secondary (max 4 per dist code × 30 = 120). */
 static constexpr int LITLEN_TABLE_EXTRA = 4096;
-static constexpr int DIST_TABLE_EXTRA   = 256;
+static constexpr int DIST_TABLE_EXTRA   = 512;  /* worst: 30 dist codes × 16 secondary = 480 */
 
 /*
  * Decode tables for one DEFLATE block.

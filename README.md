@@ -105,7 +105,9 @@ ctest --test-dir build -R compat
 ### 단일 라이브러리 벤치마크
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_BENCH=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_DEFLATE_BENCH=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench/bench_compress
 ```
@@ -114,7 +116,9 @@ cmake --build build -j$(nproc)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_BENCH=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
+      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_DEFLATE_BENCH=ON \
+      -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench/bench_compare
 ```

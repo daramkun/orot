@@ -56,6 +56,10 @@
 | F-2: 전체 리터럴 블록 STORED 직행 (compute_block_stats + Huffman estimation 생략) | ✅ |
 | F-3: BitWriter >= 56bit 시 7-byte flush (branch 빈도 감소) | ✅ |
 | F-4: BT4 match_find_bt4 redundant bounds check 제거 (avail=max_match 항등) | ✅ |
+| H-1: inflate_fast 오버래핑 copy_match 선형→더블링 O(log(len/dist)) | ✅ |
+| H-2: neon_adler32 32B/iter→64B/iter 듀얼 어큐뮬레이터 (의존성 스톨 제거) | ✅ |
+| H-3: post-inflate_fast 윈도우 싱크 조건부 스킵 (history≥WIN_SIZE 시 32KB memcpy 제거) | ✅ |
+| H-4: DIST_DECODE_BITS 8→11 (2차 거리 테이블 조회 거의 0으로 감소) | ✅ |
 
 ---
 
@@ -205,6 +209,36 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 > BitWriter 56-bit flush, 전체 리터럴 블록 STORED 직행(F-2), BT4 redundant bounds 제거.  
 > 주의: Apple M-series 열 스로틀링으로 벤치 실행마다 2-4x 편차 발생. zeros comp 수치 불안정.  
 > 잔존 격차: decomp zlib 대비 2-3x (random/stored 포함). code fast comp ours > zlib.
+
+### 최적화 후 5차 (H-1~H-4: 오버래핑 더블링, neon_adler32 64B/iter, 윈도우 싱크 스킵, DIST_DECODE_BITS 11)
+
+| 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
+|-----------|---------|------|-----------|-------------|--------|
+| ours | text (~90KB) | fast | 813.5 | 2001.1 | 0.9% |
+| zlib | text (~90KB) | fast | 957.1 | 4886.2 | 0.7% |
+| libdeflate | text (~90KB) | fast | 890.5 | 3798.8 | 0.4% |
+| ours | zeros (1MB) | fast | 908.8 | 3311.7 | 0.6% |
+| zlib | zeros (1MB) | fast | 637.3 | 6182.3 | 0.4% |
+| libdeflate | zeros (1MB) | fast | 983.3 | 7926.2 | 0.1% |
+| ours | random (1MB) | fast | 356.4 | 3634.0 | 100.0% |
+| zlib | random (1MB) | fast | 39.1 | 8185.7 | 100.0% |
+| libdeflate | random (1MB) | fast | 96.5 | 18146.6 | 100.0% |
+| ours | code (~512KB) | fast | 870.4 | 2435.0 | 1.0% |
+| zlib | code (~512KB) | fast | 652.1 | 6309.5 | 0.7% |
+| libdeflate | code (~512KB) | fast | 996.3 | 4615.6 | 0.3% |
+
+#### 4차 대비 5차 개선 요약
+
+| 데이터셋 | 4차 decomp | 5차 decomp | 개선 |
+|---------|------------|------------|------|
+| text fast | 1646 MB/s | **2001 MB/s** | +22% |
+| zeros fast | 2521 MB/s | **3311 MB/s** | +31% |
+| random fast | 3278 MB/s | **3634 MB/s** | +11% |
+| code fast | 1876 MB/s | **2435 MB/s** | +30% |
+
+> 5차 주요 변경: H-1(inflate_fast 오버래핑 더블링), H-2(neon_adler32 64B/iter 듀얼 acc),  
+> H-3(post-inflate_fast 윈도우 싱크 history<WIN_SIZE 조건부), H-4(DIST_DECODE_BITS 8→11).  
+> 잔존 격차: decomp zlib 대비 2-3x (Huffman 디코드 병목 잔존).
 
 ---
 

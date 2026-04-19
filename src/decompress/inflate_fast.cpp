@@ -1,5 +1,6 @@
 #include "inflate_fast.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 
@@ -117,12 +118,11 @@ static inline void copy_match(
 #endif
     std::memcpy(out, out - dist, dist);
     size_t filled = dist;
-    while (filled + dist <= len) {
-        std::memcpy(out + filled, out + filled - dist, dist);
-        filled += dist;
+    while (filled < len) {
+        const size_t chunk = std::min(filled, len - filled);
+        std::memcpy(out + filled, out, chunk);
+        filled += chunk;
     }
-    if (filled < len)
-        std::memcpy(out + filled, out + filled - dist, len - filled);
 }
 
 /*

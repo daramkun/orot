@@ -64,15 +64,29 @@ namespace orot { namespace deflate {
 
 uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
     static constexpr uint32_t MOD_ADLER = 65521;
-    static constexpr size_t BLOCK = 5536;  /* multiple of 32 */
+    static constexpr size_t BLOCK = 5504;  /* multiple of 64 */
 
     uint32_t s1 = adler & 0xFFFF;
     uint32_t s2 = (adler >> 16) & 0xFFFF;
 
-    static const uint8_t weights_hi_arr[16] = {
+    /*
+     * 64B/iter dual-accumulator: process bytes [0..15], [16..31], [32..47], [48..63]
+     * with positional weights [64..49], [48..33], [32..17], [16..1].
+     *
+     * vs2 carry = vs1 * 64 (each of the 64 new bytes contributes the current s1 once).
+     * Two independent register chains (b0/b1 path and b2/b3 path) let the CPU
+     * execute both halves in parallel, breaking the vs1→vs2 iteration dependency.
+     */
+    static const uint8_t w64_hi_arr[16] = {
+        64,63,62,61,60,59,58,57,56,55,54,53,52,51,50,49
+    };
+    static const uint8_t w64_lo_arr[16] = {
+        48,47,46,45,44,43,42,41,40,39,38,37,36,35,34,33
+    };
+    static const uint8_t w32_hi_arr[16] = {
         32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17
     };
-    static const uint8_t weights_lo_arr[16] = {
+    static const uint8_t w32_lo_arr[16] = {
         16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1
     };
 
@@ -80,46 +94,92 @@ uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
         const size_t chunk = (len < BLOCK) ? len : BLOCK;
         const uint8_t* end = data + chunk;
 
-        const uint8x16_t W_HI = vld1q_u8(weights_hi_arr);
-        const uint8x16_t W_LO = vld1q_u8(weights_lo_arr);
+        const uint8x16_t W64_HI = vld1q_u8(w64_hi_arr);
+        const uint8x16_t W64_LO = vld1q_u8(w64_lo_arr);
+        const uint8x16_t W32_HI = vld1q_u8(w32_hi_arr);
+        const uint8x16_t W32_LO = vld1q_u8(w32_lo_arr);
         uint32x4_t vs1 = vdupq_n_u32(0);
         uint32x4_t vs2 = vdupq_n_u32(0);
         const uint8_t* p = data;
 
+        /* 64B main loop: 4× 16-byte loads, weights [64..1] */
+        while (p + 64 <= end) {
+            /* carry: 64 new bytes each add current vs1 once to s2 */
+            vs2 = vaddq_u32(vs2, vshlq_n_u32(vs1, 6));  /* vs2 += vs1 * 64 */
+
+            uint8x16_t b0 = vld1q_u8(p);      /* weights [64..49] */
+            uint8x16_t b1 = vld1q_u8(p + 16); /* weights [48..33] */
+            uint8x16_t b2 = vld1q_u8(p + 32); /* weights [32..17] */
+            uint8x16_t b3 = vld1q_u8(p + 48); /* weights [16..1]  */
+
+            /* s1: sum all 64 bytes */
+            uint16x8_t s16_0 = vaddl_u8(vget_low_u8(b0), vget_high_u8(b0));
+            uint16x8_t s16_1 = vaddl_u8(vget_low_u8(b1), vget_high_u8(b1));
+            uint16x8_t s16_2 = vaddl_u8(vget_low_u8(b2), vget_high_u8(b2));
+            uint16x8_t s16_3 = vaddl_u8(vget_low_u8(b3), vget_high_u8(b3));
+            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_0), vget_high_u16(s16_0)));
+            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_1), vget_high_u16(s16_1)));
+            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_2), vget_high_u16(s16_2)));
+            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_3), vget_high_u16(s16_3)));
+
+            /* s2: b0 weighted [64..49] — independent of b2/b3 chain */
+            uint16x8_t h0l = vmull_u8(vget_low_u8(b0),  vget_low_u8(W64_HI));
+            uint16x8_t h0h = vmull_u8(vget_high_u8(b0), vget_high_u8(W64_HI));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h0l), vget_high_u16(h0l)));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h0h), vget_high_u16(h0h)));
+
+            /* s2: b1 weighted [48..33] */
+            uint16x8_t h1l = vmull_u8(vget_low_u8(b1),  vget_low_u8(W64_LO));
+            uint16x8_t h1h = vmull_u8(vget_high_u8(b1), vget_high_u8(W64_LO));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h1l), vget_high_u16(h1l)));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h1h), vget_high_u16(h1h)));
+
+            /* s2: b2 weighted [32..17] */
+            uint16x8_t h2l = vmull_u8(vget_low_u8(b2),  vget_low_u8(W32_HI));
+            uint16x8_t h2h = vmull_u8(vget_high_u8(b2), vget_high_u8(W32_HI));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h2l), vget_high_u16(h2l)));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h2h), vget_high_u16(h2h)));
+
+            /* s2: b3 weighted [16..1] */
+            uint16x8_t h3l = vmull_u8(vget_low_u8(b3),  vget_low_u8(W32_LO));
+            uint16x8_t h3h = vmull_u8(vget_high_u8(b3), vget_high_u8(W32_LO));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h3l), vget_high_u16(h3l)));
+            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h3h), vget_high_u16(h3h)));
+
+            p += 64;
+        }
+
+        /* 32B tail within chunk */
         while (p + 32 <= end) {
-            /* Cross-group: 32 new bytes each add current vs1 once to s2. */
             vs2 = vaddq_u32(vs2, vshlq_n_u32(vs1, 5));  /* vs2 += vs1 * 32 */
 
-            uint8x16_t b0 = vld1q_u8(p);       /* bytes [0..15], weights [32..17] */
-            uint8x16_t b1 = vld1q_u8(p + 16);  /* bytes [16..31], weights [16..1] */
+            uint8x16_t b0 = vld1q_u8(p);
+            uint8x16_t b1 = vld1q_u8(p + 16);
 
-            /* s1: sum all 32 bytes */
             uint16x8_t s16_0 = vaddl_u8(vget_low_u8(b0), vget_high_u8(b0));
             uint16x8_t s16_1 = vaddl_u8(vget_low_u8(b1), vget_high_u8(b1));
             vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_0), vget_high_u16(s16_0)));
             vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_1), vget_high_u16(s16_1)));
 
-            /* s2: b0 weighted [32..17] */
-            uint16x8_t h0l = vmull_u8(vget_low_u8(b0),  vget_low_u8(W_HI));
-            uint16x8_t h0h = vmull_u8(vget_high_u8(b0), vget_high_u8(W_HI));
+            uint16x8_t h0l = vmull_u8(vget_low_u8(b0),  vget_low_u8(W32_HI));
+            uint16x8_t h0h = vmull_u8(vget_high_u8(b0), vget_high_u8(W32_HI));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h0l), vget_high_u16(h0l)));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h0h), vget_high_u16(h0h)));
 
-            /* s2: b1 weighted [16..1] */
-            uint16x8_t h1l = vmull_u8(vget_low_u8(b1),  vget_low_u8(W_LO));
-            uint16x8_t h1h = vmull_u8(vget_high_u8(b1), vget_high_u8(W_LO));
+            uint16x8_t h1l = vmull_u8(vget_low_u8(b1),  vget_low_u8(W32_LO));
+            uint16x8_t h1h = vmull_u8(vget_high_u8(b1), vget_high_u8(W32_LO));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h1l), vget_high_u16(h1l)));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h1h), vget_high_u16(h1h)));
 
             p += 32;
         }
 
-        /* 16-byte tail within chunk */
+        /* 16B tail within chunk */
         while (p + 16 <= end) {
             vs2 = vaddq_u32(vs2, vshlq_n_u32(vs1, 4));
             uint8x16_t bytes = vld1q_u8(p);
-            uint16x8_t lo = vmull_u8(vget_low_u8(bytes),  vget_low_u8(W_LO));
-            uint16x8_t hi = vmull_u8(vget_high_u8(bytes), vget_high_u8(W_LO));
+            uint16x8_t lo = vmull_u8(vget_low_u8(bytes),  vget_low_u8(W32_LO));
+            uint16x8_t hi = vmull_u8(vget_high_u8(bytes), vget_high_u8(W32_LO));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(lo), vget_high_u16(lo)));
             vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(hi), vget_high_u16(hi)));
             uint16x8_t sum16 = vaddl_u8(vget_low_u8(bytes), vget_high_u8(bytes));

@@ -336,17 +336,22 @@ loop:
                     static_cast<size_t>(next_out - fast_out_start);
                 avail_out -= produced;
                 win_pos_  += produced;
-                /* Sync window_ so the slow-path fallback and COPY_MATCH
-                 * can resolve back-references from correct history. */
+                /* Sync window_ so slow-path COPY_MATCH can resolve back-refs.
+                 * Skip when out_origin_ already covers the full WIN_SIZE history:
+                 * slow-path resolves from out_origin_ directly in that case. */
                 if (produced > 0) {
-                    const uint8_t* wsrc = fast_out_start;
-                    size_t         wsz  = produced;
-                    if (wsz > WIN_SIZE) { wsrc += wsz - WIN_SIZE; wsz = WIN_SIZE; }
-                    const size_t dst = (win_pos_ - wsz) & (WIN_SIZE - 1);
-                    const size_t f   = std::min(wsz, WIN_SIZE - dst);
-                    std::memcpy(window_.data() + dst, wsrc, f);
-                    if (f < wsz)
-                        std::memcpy(window_.data(), wsrc + f, wsz - f);
+                    const size_t history_after =
+                        static_cast<size_t>(next_out - out_origin_);
+                    if (history_after < WIN_SIZE) {
+                        const uint8_t* wsrc = fast_out_start;
+                        size_t         wsz  = produced;
+                        if (wsz > WIN_SIZE) { wsrc += wsz - WIN_SIZE; wsz = WIN_SIZE; }
+                        const size_t dst = (win_pos_ - wsz) & (WIN_SIZE - 1);
+                        const size_t f   = std::min(wsz, WIN_SIZE - dst);
+                        std::memcpy(window_.data() + dst, wsrc, f);
+                        if (f < wsz)
+                            std::memcpy(window_.data(), wsrc + f, wsz - f);
+                    }
                 }
 
                 if (ended) {
