@@ -3,12 +3,18 @@
 #include <cassert>
 #include <cstring>
 
+#if defined(DEFLATE_HAS_NEON)
+#include <arm_neon.h>
+#endif
+
 namespace orot { namespace deflate {
 
 /*
  * copy_match: back-copy `len` bytes from `dist` bytes back in output.
  *
- * Fast path: len <= 16, dist >= 16 → two word loads, no overlap possible.
+ * Fast path: len <= 16, dist >= 16 → single 128-bit NEON load+store (ARM)
+ *            or two word loads (scalar fallback).  Always writes 16 bytes
+ *            (safe because the caller ensures out + 258 <= out_end).
  * Non-overlapping (len <= dist): single memcpy.
  * dist == 1: RLE memset.
  * Overlapping (dist < len, dist > 1): doubling memcpy, O(log(len/dist)) calls.
@@ -18,11 +24,15 @@ static inline void copy_match(
 {
     /* Fast path: short match, guaranteed non-overlapping */
     if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
+#if defined(DEFLATE_HAS_NEON)
+        vst1q_u8(out, vld1q_u8(out - dist));
+#else
         uint64_t w0, w1;
         std::memcpy(&w0, out - dist,     8);
         std::memcpy(&w1, out - dist + 8, 8);
         std::memcpy(out,     &w0, 8);
         std::memcpy(out + 8, &w1, 8);
+#endif
         return;
     }
     if (len <= dist) {
@@ -82,6 +92,7 @@ bool inflate_fast(
          * One refill gives ≤56 bits of new data; total in accumulator ≤63 bits.
          * That covers: litlen(≤15) + len_extra(≤5) + dist(≤15) + dist_extra(≤13) = 48 bits max.
          */
+        if (__builtin_expect(src + 8 > src_end, 0)) goto done;
         {
             uint64_t word;
             std::memcpy(&word, src, 8);
@@ -92,81 +103,100 @@ bool inflate_fast(
         }
 
         /* ── Decode literal/length symbol ──────────────────────────── */
-        uint32_t entry = tables.litlen[static_cast<uint32_t>(bits) & ((1u << LITLEN_DECODE_BITS) - 1)];
-
-        if (__builtin_expect(entry & HUFF_SUBTABLE_FLAG, 0)) {
-            /* Secondary table lookup (codes > LITLEN_DECODE_BITS bits).
-             * Extract secondary index WITHOUT consuming primary bits first —
-             * shift right by LITLEN_DECODE_BITS to see beyond the primary.
-             * Then the final `bits >>= ebits` below consumes the FULL code
-             * length in one step, avoiding the double-consume bug
-             * (consume_primary + consume_full_len = primary + full ≠ full). */
-            const int sec_bits   = static_cast<int>((entry >> 16) & 0xFF);
-            const int sec_offset = static_cast<int>(entry & 0xFFFF);
-            entry = tables.litlen[sec_offset +
-                ((static_cast<uint32_t>(bits) >> LITLEN_DECODE_BITS) & ((1u << sec_bits) - 1))];
-        }
-
-        const int ebits = static_cast<int>((entry >> 16) & 0xFF);
-        bits    >>= ebits;
-        bit_cnt -= ebits;
-
-        if (__builtin_expect(entry & HUFF_LITERAL_FLAG, 1)) {
-            /* Literal — most common path; sym in bits[7:0] */
-            *out++ = static_cast<uint8_t>(entry);
-            if (__builtin_expect(out > safe_out_end, 0)) goto done;
-            continue;
-        }
-
+        /*
+         * decode_symbol: decode the next symbol using the current bit accumulator
+         * without refilling.  When we decode a literal we jump back here if we
+         * still have >= LITLEN_DECODE_BITS bits available, avoiding one 8-byte
+         * load per literal — roughly halves the refill rate on literal-heavy
+         * streams.  The jump is always backward, so C++ initialization rules
+         * are not violated.
+         */
+decode_symbol:;
         {
-            const int sym = static_cast<int>(entry & 0xFFFF);
+            uint32_t entry = tables.litlen[static_cast<uint32_t>(bits) & ((1u << LITLEN_DECODE_BITS) - 1)];
 
-            if (sym == 256) {
-                /* End-of-block */
-                ended = true;
-                goto done;
+            if (__builtin_expect(entry & HUFF_SUBTABLE_FLAG, 0)) {
+                /* Secondary table lookup (codes > LITLEN_DECODE_BITS bits).
+                 * Extract secondary index WITHOUT consuming primary bits first —
+                 * shift right by LITLEN_DECODE_BITS to see beyond the primary.
+                 * Then the final `bits >>= ebits` below consumes the FULL code
+                 * length in one step, avoiding the double-consume bug
+                 * (consume_primary + consume_full_len = primary + full ≠ full). */
+                const int sec_bits   = static_cast<int>((entry >> 16) & 0xFF);
+                const int sec_offset = static_cast<int>(entry & 0xFFFF);
+                entry = tables.litlen[sec_offset +
+                    ((static_cast<uint32_t>(bits) >> LITLEN_DECODE_BITS) & ((1u << sec_bits) - 1))];
             }
 
-            /* Length code (sym 257-285) */
-            const int li        = sym - 257;
-            int       match_len = LENGTH_BASE[li];
-            const int len_extra = LENGTH_EXTRA_BITS[li];
-            if (len_extra > 0) {
-                match_len += static_cast<int>(static_cast<uint32_t>(bits) & ((1u << len_extra) - 1));
-                bits    >>= len_extra;
-                bit_cnt -= len_extra;
+            const int ebits = static_cast<int>((entry >> 16) & 0xFF);
+            bits    >>= ebits;
+            bit_cnt -= ebits;
+
+            if (__builtin_expect(entry & HUFF_LITERAL_FLAG, 1)) {
+                /* Literal — most common path; sym in bits[7:0] */
+                *out++ = static_cast<uint8_t>(entry);
+                if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                /*
+                 * If we still have enough bits for a primary-table lookup,
+                 * skip the refill and decode the next symbol immediately.
+                 * This avoids one 8-byte load per literal on consecutive-
+                 * literal runs, which is the dominant case for text data.
+                 */
+                if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                    goto decode_symbol;
+                continue;
             }
 
-            /* ── Decode distance symbol ── */
-            uint32_t dentry = tables.dist[static_cast<uint32_t>(bits) & ((1u << DIST_DECODE_BITS) - 1)];
-            if (__builtin_expect(dentry & HUFF_SUBTABLE_FLAG, 0)) {
-                /* Same fix as litlen: extract secondary index without consuming
-                 * primary bits — shift right by DIST_DECODE_BITS instead.    */
-                const int sec_bits   = static_cast<int>((dentry >> 16) & 0xFF);
-                const int sec_offset = static_cast<int>(dentry & 0xFFFF);
-                dentry = tables.dist[sec_offset +
-                    ((static_cast<uint32_t>(bits) >> DIST_DECODE_BITS) & ((1u << sec_bits) - 1))];
+            {
+                const int sym = static_cast<int>(entry & 0xFFFF);
+
+                if (sym == 256) {
+                    /* End-of-block */
+                    ended = true;
+                    goto done;
+                }
+
+                /* Length code (sym 257-285) */
+                const int li        = sym - 257;
+                int       match_len = LENGTH_BASE[li];
+                const int len_extra = LENGTH_EXTRA_BITS[li];
+                if (len_extra > 0) {
+                    match_len += static_cast<int>(static_cast<uint32_t>(bits) & ((1u << len_extra) - 1));
+                    bits    >>= len_extra;
+                    bit_cnt -= len_extra;
+                }
+
+                /* ── Decode distance symbol ── */
+                uint32_t dentry = tables.dist[static_cast<uint32_t>(bits) & ((1u << DIST_DECODE_BITS) - 1)];
+                if (__builtin_expect(dentry & HUFF_SUBTABLE_FLAG, 0)) {
+                    /* Same fix as litlen: extract secondary index without consuming
+                     * primary bits — shift right by DIST_DECODE_BITS instead.    */
+                    const int sec_bits   = static_cast<int>((dentry >> 16) & 0xFF);
+                    const int sec_offset = static_cast<int>(dentry & 0xFFFF);
+                    dentry = tables.dist[sec_offset +
+                        ((static_cast<uint32_t>(bits) >> DIST_DECODE_BITS) & ((1u << sec_bits) - 1))];
+                }
+
+                const int di    = static_cast<int>(dentry & 0xFFFF);
+                const int dbits = static_cast<int>((dentry >> 16) & 0xFF);
+                bits    >>= dbits;
+                bit_cnt -= dbits;
+
+                int dist = DIST_BASE[di];
+                const int dist_extra = DIST_EXTRA_BITS[di];
+                if (dist_extra > 0) {
+                    dist    += static_cast<int>(static_cast<uint32_t>(bits) & ((1u << dist_extra) - 1));
+                    bits    >>= dist_extra;
+                    bit_cnt -= dist_extra;
+                }
+
+                /* Bounds check */
+                if (out + match_len > out_end) goto done;
+                if (static_cast<ptrdiff_t>(dist) > out - out_buf) goto done;
+
+                copy_match(out, static_cast<size_t>(dist), static_cast<size_t>(match_len));
+                out += match_len;
             }
-
-            const int di    = static_cast<int>(dentry & 0xFFFF);
-            const int dbits = static_cast<int>((dentry >> 16) & 0xFF);
-            bits    >>= dbits;
-            bit_cnt -= dbits;
-
-            int dist = DIST_BASE[di];
-            const int dist_extra = DIST_EXTRA_BITS[di];
-            if (dist_extra > 0) {
-                dist    += static_cast<int>(static_cast<uint32_t>(bits) & ((1u << dist_extra) - 1));
-                bits    >>= dist_extra;
-                bit_cnt -= dist_extra;
-            }
-
-            /* Bounds check */
-            if (out + match_len > out_end) goto done;
-            if (static_cast<ptrdiff_t>(dist) > out - out_buf) goto done;
-
-            copy_match(out, static_cast<size_t>(dist), static_cast<size_t>(match_len));
-            out += match_len;
         }
 
         /* Stop if no longer in "safe" region */
