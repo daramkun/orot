@@ -43,6 +43,7 @@ if(OROT_DEFLATE_THREADS)
   list(APPEND OROT_DEFLATE_CORE_SOURCES
         src/parallel/thread_pool.cpp
         src/parallel/parallel_compressor.cpp
+        src/decompress/parallel_decompress.cpp
     )
 endif()
 

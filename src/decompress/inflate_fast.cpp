@@ -14,14 +14,17 @@ namespace orot { namespace deflate {
 /*
  * copy_match: back-copy `len` bytes from `dist` bytes back in output.
  *
- * NEON fast paths:
- *   len ≤ 32, dist ≥ 32 → two 128-bit load+store (always writes 32 bytes).
- *   len ≤ 16, dist ≥ 16 → single 128-bit load+store (always writes 16 bytes).
- * Both are safe because the caller ensures out + 258 ≤ out_end; the extra
- * bytes written past `len` will be overwritten by subsequent decode ops.
+ * NEON fast paths (non-overlapping only — dist >= len):
+ *   len ≤ 128, dist ≥ 128 → 8× 128-bit ops
+ *   len ≤  64, dist ≥  64 → 4× 128-bit ops
+ *   len ≤  32, dist ≥  32 → 2× 128-bit ops
+ *   len ≤  16, dist ≥  16 → 1× 128-bit op (most common)
  *
- * SSE2 fast path: len ≤ 16, dist ≥ 16 → single 128-bit load+store.
- * Scalar fast path: same condition, two word-sized memcpy calls.
+ * SSE2 fast paths:
+ *   len ≤  32, dist ≥  32 → 2× 128-bit ops
+ *   len ≤  16, dist ≥  16 → 1× 128-bit op
+ *
+ * Scalar fast path: len ≤ 16, dist ≥ 16 → two word memcpy.
  *
  * Non-overlapping (len ≤ dist): single memcpy.
  * dist == 1: RLE memset.
@@ -31,21 +34,42 @@ static inline void copy_match(
     uint8_t* out, size_t dist, size_t len) noexcept
 {
 #if defined(DEFLATE_HAS_NEON)
-    /* Most common: short match, large enough distance — single 128-bit op */
     if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
         vst1q_u8(out, vld1q_u8(out - dist));
         return;
     }
-    /* Medium match, guaranteed non-overlapping — two 128-bit ops */
     if (__builtin_expect(len <= 32 && dist >= 32, 0)) {
-        vst1q_u8(out,      vld1q_u8(out - dist));
-        vst1q_u8(out + 16, vld1q_u8(out - dist + 16));
+        const uint8_t* s = out - dist;
+        vst1q_u8(out,      vld1q_u8(s));
+        vst1q_u8(out + 16, vld1q_u8(s + 16));
+        return;
+    }
+    if (__builtin_expect(len <= 64 && dist >= 64, 0)) {
+        const uint8_t* s = out - dist;
+        vst1q_u8(out,      vld1q_u8(s));
+        vst1q_u8(out + 16, vld1q_u8(s + 16));
+        vst1q_u8(out + 32, vld1q_u8(s + 32));
+        vst1q_u8(out + 48, vld1q_u8(s + 48));
+        return;
+    }
+    if (__builtin_expect(len <= 128 && dist >= 128, 0)) {
+        const uint8_t* s = out - dist;
+        for (int k = 0; k < 8; ++k)
+            vst1q_u8(out + k * 16, vld1q_u8(s + k * 16));
         return;
     }
 #elif defined(DEFLATE_HAS_SSE2)
     if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
         _mm_storeu_si128(reinterpret_cast<__m128i*>(out),
             _mm_loadu_si128(reinterpret_cast<const __m128i*>(out - dist)));
+        return;
+    }
+    if (__builtin_expect(len <= 32 && dist >= 32, 0)) {
+        const uint8_t* s = out - dist;
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out),
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(s)));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 16),
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(s + 16)));
         return;
     }
 #else
@@ -66,7 +90,6 @@ static inline void copy_match(
         std::memset(out, out[-1], len);
         return;
     }
-    /* Overlapping RLE expansion: doubling memcpy, O(log(len/dist)) calls. */
     std::memcpy(out, out - dist, dist);
     size_t filled = dist;
     while (filled + dist <= len) {
@@ -77,6 +100,42 @@ static inline void copy_match(
         std::memcpy(out + filled, out + filled - dist, len - filled);
 }
 
+/*
+ * 128-bit bit accumulator helpers.
+ *
+ * State: bits_lo (bits 0..63), bits_hi (bits 64..127), bit_cnt (0..128).
+ * Invariant: bit i is in lo[i] if i < 64, in hi[i-64] if i >= 64.
+ * bits[0..bit_cnt-1] are guaranteed valid stream bits.
+ *
+ * acc_extract: extract LITLEN_DECODE_BITS bits at offset `off`.
+ * acc_consume: discard the low n bits (right-shift the 128-bit register).
+ */
+
+static constexpr uint32_t ACC_MASK11 = (1u << LITLEN_DECODE_BITS) - 1;
+
+static inline uint32_t acc_extract(uint64_t lo, uint64_t hi, int off) noexcept {
+    if (__builtin_expect(off + LITLEN_DECODE_BITS <= 64, 1))
+        return static_cast<uint32_t>(lo >> off) & ACC_MASK11;
+    if (off >= 64)
+        return static_cast<uint32_t>(hi >> (off - 64)) & ACC_MASK11;
+    /* off in [64-LITLEN_DECODE_BITS .. 63]: straddles lo/hi boundary */
+    return static_cast<uint32_t>((lo >> off) | (hi << (64 - off))) & ACC_MASK11;
+}
+
+static inline void acc_consume(uint64_t& lo, uint64_t& hi, int& cnt, int n) noexcept {
+    if (__builtin_expect(n == 0, 0)) return;
+    if (__builtin_expect(n < 64, 1)) {
+        /* n in [1..63]: no undefined shift (64-n in [1..63], n in [1..63]) */
+        lo   = (lo >> n) | (hi << (64 - n));
+        hi >>= n;
+    } else {
+        /* n in [64..127]: lo gets hi shifted right, hi zeroed */
+        lo   = (n < 128) ? (hi >> (n - 64)) : 0ULL;
+        hi   = 0;
+    }
+    cnt -= n;
+}
+
 bool inflate_fast(
     BitReader&           br,
     uint8_t*             out_buf,
@@ -84,19 +143,10 @@ bool inflate_fast(
     const uint8_t*       out_end,
     const InflateTables& tables)
 {
-    /*
-     * Hoist all hot state to local variables so the compiler can keep them
-     * in registers.  The critical issue: out_ptr is uint8_t*& (reference),
-     * so every *out_ptr++ forces a memory load+store through the reference.
-     * Similarly, br methods access member fields through a reference, and
-     * the compiler must assume that writing through a uint8_t* can alias any
-     * type (C++ strict aliasing: unsigned char exemption), so it would reload
-     * br.bits_ / br.bit_count_ / br.ptr_ after every *out++ store.
-     * Local copies break the alias chain → registers throughout the loop.
-     */
     const uint8_t* src     = br.current_ptr();
     const uint8_t* src_end = br.end_ptr();
-    uint64_t       bits    = br.raw_bits();
+    uint64_t       bits_lo = br.raw_bits();
+    uint64_t       bits_hi = 0;
     int            bit_cnt = br.raw_bit_count();
     uint8_t*       out     = out_ptr;
 
@@ -104,141 +154,168 @@ bool inflate_fast(
 
     bool ended = false;
 
+    /* Minimum bits needed at decode_symbol to decode any symbol without refill.
+     * Worst case: 15 (litlen) + 5 (len_extra) + 15 (dist) + 13 (dist_extra) = 48.
+     * Use 56 for alignment with the 7-byte standard refill quantum. */
+    static constexpr int MIN_DECODE_BITS = 56;
+
     for (;;) {
         /*
-         * Unconditional fast refill — safe because:
-         *  1. Loop entry: caller checked avail_in >= 10.
-         *  2. Loop bottom: exits when src + 8 > src_end.
-         * One refill gives ≤56 bits of new data; total in accumulator ≤63 bits.
-         * That covers: litlen(≤15) + len_extra(≤5) + dist(≤15) + dist_extra(≤13) = 48 bits max.
+         * 128-bit refill — two sequential 8-byte loads.
+         *
+         * Load 1 (fill lo to ~56 bits):
+         *   Standard 64-bit refill: advance src by (63-bit_cnt)/8 bytes.
+         *   After Load 1: bit_cnt in [56..63], lo holds ~56-63 bits.
+         *
+         * Load 2 (fill hi to get ~120 bits total):
+         *   Places the next word starting at bit position bit_cnt.
+         *   After Load 2: bit_cnt in [120..127], hi holds ~56-63 bits.
+         *
+         * At the top of the loop, bit_cnt is always <= 63 (invariant: see notes
+         * on goto decode_symbol below).
          */
         if (__builtin_expect(src + 8 > src_end, 0)) goto done;
+
+        /* Load 1: fill bits_lo */
         {
-            uint64_t word;
-            std::memcpy(&word, src, 8);
-            bits    |= word << bit_cnt;
-            int nb   = (63 - bit_cnt) >> 3;
+            uint64_t w;
+            std::memcpy(&w, src, 8);
+            bits_lo |= w << bit_cnt;
+            const int nb = (63 - bit_cnt) >> 3;
+            src     += nb;
+            bit_cnt += nb << 3;
+        }
+
+        /* Load 2: fill bits_hi (only if there's room and input available) */
+        if (__builtin_expect(src + 8 <= src_end && bit_cnt < 120, 1)) {
+            uint64_t w;
+            std::memcpy(&w, src, 8);
+            const int pos = bit_cnt;
+            /* pos is in [56..63]: always < 64, so use the split formula */
+            bits_lo |= w << pos;                          /* fills lo[pos..63]: 1 byte max */
+            bits_hi  = (pos > 0) ? (w >> (64 - pos))     /* fills hi[0..63-pos] from w */
+                                 : 0ULL;
+            const int nb = (127 - pos) >> 3;
             src     += nb;
             bit_cnt += nb << 3;
         }
 
         /* ── Decode literal/length symbol ──────────────────────────── */
-        /*
-         * decode_symbol: decode the next symbol using the current bit accumulator
-         * without refilling.  When we decode a literal we jump back here if we
-         * still have >= LITLEN_DECODE_BITS bits available, avoiding one 8-byte
-         * load per literal — roughly halves the refill rate on literal-heavy
-         * streams.  The jump is always backward, so C++ initialization rules
-         * are not violated.
-         */
 decode_symbol:;
         {
-            uint32_t e0 = tables.litlen[static_cast<uint32_t>(bits) & ((1u << LITLEN_DECODE_BITS) - 1)];
+            const uint32_t e0_idx =
+                static_cast<uint32_t>(bits_lo) & ACC_MASK11;
+            uint32_t e0 = tables.litlen[e0_idx];
 
-            /* Track whether secondary lookup is needed so NEON batch can skip it. */
             const bool had_secondary = !!(e0 & HUFF_SUBTABLE_FLAG);
             if (__builtin_expect(had_secondary, 0)) {
-                /* Secondary table lookup (codes > LITLEN_DECODE_BITS bits).
-                 * Extract secondary index WITHOUT consuming primary bits first —
-                 * shift right by LITLEN_DECODE_BITS to see beyond the primary.
-                 * Then the final `bits >>= ebits` below consumes the FULL code
-                 * length in one step, avoiding the double-consume bug
-                 * (consume_primary + consume_full_len = primary + full ≠ full). */
                 const int sec_bits   = static_cast<int>((e0 >> 16) & 0xFF);
                 const int sec_offset = static_cast<int>(e0 & 0xFFFF);
                 e0 = tables.litlen[sec_offset +
-                    ((static_cast<uint32_t>(bits) >> LITLEN_DECODE_BITS) & ((1u << sec_bits) - 1))];
+                    ((static_cast<uint32_t>(bits_lo) >> LITLEN_DECODE_BITS) &
+                     ((1u << sec_bits) - 1))];
             }
 
             const int ebits0 = static_cast<int>((e0 >> 16) & 0xFF);
 
 #if defined(DEFLATE_HAS_NEON)
             /*
-             * Nested speculative NEON literal batch: 1+5 (6 symbols) with 1+3 (4) fallback.
+             * NEON speculative literal batch: 1+8 (9 symbols) with 1+5 (6)
+             * and 1+3 (4) fallbacks.
              *
-             * e0 is on the dependency chain (already decoded).  Using ebits0 as stride,
-             * speculatively issue e1..e5 loads — all independent of each other and of
-             * future bit consumption, so the OOO core executes them in parallel.
+             * Requires bit_cnt >= 9 * LITLEN_DECODE_BITS (99 bits with 11-bit table).
+             * Uses the 128-bit accumulator to supply all 99 bits in one pass.
              *
-             * 1+5 attempt (bit_cnt ≥ 54): verifies e1..e5 with two uint32x4_t; uses
-             *   vcreate_u32/vcombine_u32 to build vectors from integer registers without
-             *   a stack round-trip; vminvq_u32 (single UMINV) checks all lanes.
-             *   Outputs 6 bytes as one 64-bit store (safe: 258-byte headroom ensures
-             *   8-byte write is within bounds; advance is only 6).
-             *
-             * 1+3 fallback (bit_cnt ≥ 36): reuses e1..e3 already in flight;
-             *   single uint32x4_t + vminvq_u32; 4-byte store.
+             * The 1+8 batch stores 9 bytes as one 8-byte + 1-byte write.
+             * Falls through to 1+5 or 1+3 when any symbol fails verification.
              */
             if (__builtin_expect(
                     !had_secondary &&
                     (e0 & HUFF_LITERAL_FLAG) &&
-                    bit_cnt >= 4 * LITLEN_DECODE_BITS,
+                    bit_cnt >= 9 * LITLEN_DECODE_BITS,
                     1)) {
-                static constexpr uint32_t MASK9 = (1u << LITLEN_DECODE_BITS) - 1;
                 const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
                 const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
 
-                /* e1..e3 needed by both 1+5 and 1+3 paths — load them unconditionally. */
-                const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)         & MASK9];
-                const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0))   & MASK9];
-                const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0))   & MASK9];
+                const uint32_t e1 = tables.litlen[acc_extract(bits_lo, bits_hi,   ebits0)];
+                const uint32_t e2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*ebits0)];
+                const uint32_t e3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*ebits0)];
+                const uint32_t e4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*ebits0)];
+                const uint32_t e5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*ebits0)];
+                const uint32_t e6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*ebits0)];
+                const uint32_t e7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*ebits0)];
+                const uint32_t e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
 
-                if (bit_cnt >= 6 * LITLEN_DECODE_BITS) {
-                    /* 1+5: additionally load e4, e5 */
-                    const uint32_t e4 = tables.litlen[static_cast<uint32_t>(bits >> (4 * ebits0)) & MASK9];
-                    const uint32_t e5 = tables.litlen[static_cast<uint32_t>(bits >> (5 * ebits0)) & MASK9];
+                const uint32x4_t mask_v = vdupq_n_u32(CHECK);
+                const uint32x4_t ok_v   = vdupq_n_u32(OK);
+                const uint32x4_t ev0 = vcombine_u32(
+                    vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
+                    vcreate_u32((uint64_t)e3 | ((uint64_t)e4 << 32)));
+                const uint32x4_t ev1 = vcombine_u32(
+                    vcreate_u32((uint64_t)e5 | ((uint64_t)e6 << 32)),
+                    vcreate_u32((uint64_t)e7 | ((uint64_t)e8 << 32)));
+                const uint32x4_t cmp = vandq_u32(
+                    vceqq_u32(vandq_u32(ev0, mask_v), ok_v),
+                    vceqq_u32(vandq_u32(ev1, mask_v), ok_v));
 
-                    const uint32x4_t mask_v = vdupq_n_u32(CHECK);
-                    const uint32x4_t ok_v   = vdupq_n_u32(OK);
-                    /* Build vectors directly from integer registers: no stack store/load */
-                    const uint32x4_t ev0 = vcombine_u32(
+                if (__builtin_expect(vminvq_u32(cmp) == UINT32_MAX, 1)) {
+                    const uint64_t pack8 =
+                        (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
+                        ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
+                        ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40) |
+                        ((uint64_t)(uint8_t)e6 << 48) | ((uint64_t)(uint8_t)e7 << 56);
+                    std::memcpy(out, &pack8, 8);
+                    out[8] = static_cast<uint8_t>(e8);
+                    out += 9;
+                    acc_consume(bits_lo, bits_hi, bit_cnt, 9 * ebits0);
+                    if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                    if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
+                        goto decode_symbol;
+                    continue;
+                }
+
+                /* 1+8 failed: try 1+5 */
+                if (__builtin_expect(bit_cnt >= 6 * LITLEN_DECODE_BITS, 1)) {
+                    const uint32x4_t ev2 = vcombine_u32(
                         vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
                         vcreate_u32((uint64_t)e3 | ((uint64_t)e4 << 32)));
-                    /* Pad lanes 6-8 with OK so they always pass verification */
-                    const uint32x4_t ev1 = vcombine_u32(
+                    const uint32x4_t ev3 = vcombine_u32(
                         vcreate_u32((uint64_t)e5 | ((uint64_t)OK << 32)),
                         vdup_n_u32(OK));
-                    const uint32x4_t cmp = vandq_u32(
-                        vceqq_u32(vandq_u32(ev0, mask_v), ok_v),
-                        vceqq_u32(vandq_u32(ev1, mask_v), ok_v));
-
-                    if (__builtin_expect(vminvq_u32(cmp) == UINT32_MAX, 1)) {
-                        /* Pack 6 literal bytes into one 64-bit store (upper 2 bytes = 0,
-                         * overwritten by next decode; safe within 258-byte headroom). */
-                        const uint64_t pack =
+                    const uint32x4_t cmp2 = vandq_u32(
+                        vceqq_u32(vandq_u32(ev2, mask_v), ok_v),
+                        vceqq_u32(vandq_u32(ev3, mask_v), ok_v));
+                    if (__builtin_expect(vminvq_u32(cmp2) == UINT32_MAX, 1)) {
+                        const uint64_t pack6 =
                             (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
                             ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
                             ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40);
-                        std::memcpy(out, &pack, 8);
-                        out     += 6;
-                        bits    >>= 6 * ebits0;
-                        bit_cnt -=  6 * ebits0;
+                        std::memcpy(out, &pack6, 8);  /* safe: 258-byte headroom */
+                        out += 6;
+                        acc_consume(bits_lo, bits_hi, bit_cnt, 6 * ebits0);
                         if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                        if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                        if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
                             goto decode_symbol;
                         continue;
                     }
-                    /* 1+5 failed: fall through to 1+3 with e1..e3 already in registers */
                 }
 
+                /* 1+3 fallback */
                 {
-                    /* 1+3 fallback: verify e1..e3; pad lane 4 with OK (always passes). */
-                    const uint32x4_t ev = vcombine_u32(
+                    const uint32x4_t ev4 = vcombine_u32(
                         vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
                         vcreate_u32((uint64_t)e3 | ((uint64_t)OK << 32)));
-                    const uint32x4_t cmp = vceqq_u32(
-                        vandq_u32(ev, vdupq_n_u32(CHECK)), vdupq_n_u32(OK));
-
-                    if (__builtin_expect(vminvq_u32(cmp) == UINT32_MAX, 1)) {
-                        uint32_t pack4 =
+                    const uint32x4_t cmp3 = vceqq_u32(
+                        vandq_u32(ev4, vdupq_n_u32(CHECK)), vdupq_n_u32(OK));
+                    if (__builtin_expect(vminvq_u32(cmp3) == UINT32_MAX, 1)) {
+                        const uint32_t pack4 =
                             (uint32_t)(uint8_t)e0 | ((uint32_t)(uint8_t)e1 <<  8) |
                             ((uint32_t)(uint8_t)e2 << 16) | ((uint32_t)(uint8_t)e3 << 24);
                         std::memcpy(out, &pack4, 4);
-                        out     += 4;
-                        bits    >>= 4 * ebits0;
-                        bit_cnt -=  4 * ebits0;
+                        out += 4;
+                        acc_consume(bits_lo, bits_hi, bit_cnt, 4 * ebits0);
                         if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                        if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                        if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
                             goto decode_symbol;
                         continue;
                     }
@@ -246,69 +323,86 @@ decode_symbol:;
             }
 #elif defined(DEFLATE_HAS_SSE2)
             /*
-             * x86 nested literal batch: same 1+5 + 1+3 structure as NEON,
-             * using scalar bitwise AND for verification (OOO executes in parallel).
-             * Packed 32/64-bit stores replace individual byte writes.
+             * x86 1+8 literal batch (scalar AND verification, OOO-friendly).
              */
             if (__builtin_expect(
                     !had_secondary &&
                     (e0 & HUFF_LITERAL_FLAG) &&
-                    bit_cnt >= 4 * LITLEN_DECODE_BITS,
+                    bit_cnt >= 9 * LITLEN_DECODE_BITS,
                     1)) {
-                static constexpr uint32_t MASK9 = (1u << LITLEN_DECODE_BITS) - 1;
                 const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
                 const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
 
-                const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)         & MASK9];
-                const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0))   & MASK9];
-                const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0))   & MASK9];
+                const uint32_t e1 = tables.litlen[acc_extract(bits_lo, bits_hi,   ebits0)];
+                const uint32_t e2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*ebits0)];
+                const uint32_t e3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*ebits0)];
+                const uint32_t e4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*ebits0)];
+                const uint32_t e5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*ebits0)];
+                const uint32_t e6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*ebits0)];
+                const uint32_t e7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*ebits0)];
+                const uint32_t e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
 
-                if (bit_cnt >= 6 * LITLEN_DECODE_BITS) {
-                    const uint32_t e4 = tables.litlen[static_cast<uint32_t>(bits >> (4 * ebits0)) & MASK9];
-                    const uint32_t e5 = tables.litlen[static_cast<uint32_t>(bits >> (5 * ebits0)) & MASK9];
-                    if (__builtin_expect(
-                            ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) & ((e3 & CHECK) == OK) &
-                            ((e4 & CHECK) == OK) & ((e5 & CHECK) == OK), 1)) {
-                        const uint64_t pack =
-                            (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
-                            ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
-                            ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40);
-                        std::memcpy(out, &pack, 8);
-                        out     += 6;
-                        bits    >>= 6 * ebits0;
-                        bit_cnt -=  6 * ebits0;
-                        if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                        if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
-                            goto decode_symbol;
-                        continue;
-                    }
-                }
                 if (__builtin_expect(
-                        ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) & ((e3 & CHECK) == OK), 1)) {
-                    uint32_t pack4 =
+                        ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) &
+                        ((e3 & CHECK) == OK) & ((e4 & CHECK) == OK) &
+                        ((e5 & CHECK) == OK) & ((e6 & CHECK) == OK) &
+                        ((e7 & CHECK) == OK) & ((e8 & CHECK) == OK), 1)) {
+                    const uint64_t pack8 =
+                        (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
+                        ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
+                        ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40) |
+                        ((uint64_t)(uint8_t)e6 << 48) | ((uint64_t)(uint8_t)e7 << 56);
+                    std::memcpy(out, &pack8, 8);
+                    out[8] = static_cast<uint8_t>(e8);
+                    out += 9;
+                    acc_consume(bits_lo, bits_hi, bit_cnt, 9 * ebits0);
+                    if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                    if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
+                        goto decode_symbol;
+                    continue;
+                }
+                /* 1+5 fallback */
+                if (__builtin_expect(
+                        ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) &
+                        ((e3 & CHECK) == OK) & ((e4 & CHECK) == OK) &
+                        ((e5 & CHECK) == OK), 1)) {
+                    const uint64_t pack6 =
+                        (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
+                        ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
+                        ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40);
+                    std::memcpy(out, &pack6, 8);
+                    out += 6;
+                    acc_consume(bits_lo, bits_hi, bit_cnt, 6 * ebits0);
+                    if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                    if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
+                        goto decode_symbol;
+                    continue;
+                }
+                /* 1+3 fallback */
+                if (__builtin_expect(
+                        ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) &
+                        ((e3 & CHECK) == OK), 1)) {
+                    const uint32_t pack4 =
                         (uint32_t)(uint8_t)e0 | ((uint32_t)(uint8_t)e1 <<  8) |
                         ((uint32_t)(uint8_t)e2 << 16) | ((uint32_t)(uint8_t)e3 << 24);
                     std::memcpy(out, &pack4, 4);
-                    out     += 4;
-                    bits    >>= 4 * ebits0;
-                    bit_cnt -=  4 * ebits0;
+                    out += 4;
+                    acc_consume(bits_lo, bits_hi, bit_cnt, 4 * ebits0);
                     if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                    if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                    if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
                         goto decode_symbol;
                     continue;
                 }
             }
 #endif /* DEFLATE_HAS_NEON / DEFLATE_HAS_SSE2 */
 
-            /* Scalar fallback: consume e0's bits and handle it alone. */
-            bits    >>= ebits0;
-            bit_cnt -= ebits0;
+            /* Scalar path: consume e0 and handle it alone. */
+            acc_consume(bits_lo, bits_hi, bit_cnt, ebits0);
 
             if (__builtin_expect(e0 & HUFF_LITERAL_FLAG, 1)) {
-                /* Literal — most common path; sym in bits[7:0] */
                 *out++ = static_cast<uint8_t>(e0);
                 if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
                     goto decode_symbol;
                 continue;
             }
@@ -317,61 +411,85 @@ decode_symbol:;
                 const int sym = static_cast<int>(e0 & 0xFFFF);
 
                 if (sym == 256) {
-                    /* End-of-block */
                     ended = true;
                     goto done;
                 }
 
-                /* Length code (sym 257-285) */
                 const int li        = sym - 257;
                 int       match_len = LENGTH_BASE[li];
                 const int len_extra = LENGTH_EXTRA_BITS[li];
                 if (len_extra > 0) {
-                    match_len += static_cast<int>(static_cast<uint32_t>(bits) & ((1u << len_extra) - 1));
-                    bits    >>= len_extra;
-                    bit_cnt -= len_extra;
+                    match_len += static_cast<int>(
+                        static_cast<uint32_t>(bits_lo) & ((1u << len_extra) - 1));
+                    acc_consume(bits_lo, bits_hi, bit_cnt, len_extra);
                 }
 
-                /* ── Decode distance symbol ── */
-                uint32_t dentry = tables.dist[static_cast<uint32_t>(bits) & ((1u << DIST_DECODE_BITS) - 1)];
+                /* Decode distance symbol */
+                uint32_t dentry = tables.dist[
+                    static_cast<uint32_t>(bits_lo) & ((1u << DIST_DECODE_BITS) - 1)];
                 if (__builtin_expect(dentry & HUFF_SUBTABLE_FLAG, 0)) {
-                    /* Same fix as litlen: extract secondary index without consuming
-                     * primary bits — shift right by DIST_DECODE_BITS instead.    */
                     const int sec_bits   = static_cast<int>((dentry >> 16) & 0xFF);
                     const int sec_offset = static_cast<int>(dentry & 0xFFFF);
                     dentry = tables.dist[sec_offset +
-                        ((static_cast<uint32_t>(bits) >> DIST_DECODE_BITS) & ((1u << sec_bits) - 1))];
+                        ((static_cast<uint32_t>(bits_lo) >> DIST_DECODE_BITS) &
+                         ((1u << sec_bits) - 1))];
                 }
 
                 const int di    = static_cast<int>(dentry & 0xFFFF);
                 const int dbits = static_cast<int>((dentry >> 16) & 0xFF);
-                bits    >>= dbits;
-                bit_cnt -= dbits;
+                acc_consume(bits_lo, bits_hi, bit_cnt, dbits);
 
                 int dist = DIST_BASE[di];
                 const int dist_extra = DIST_EXTRA_BITS[di];
                 if (dist_extra > 0) {
-                    dist    += static_cast<int>(static_cast<uint32_t>(bits) & ((1u << dist_extra) - 1));
-                    bits    >>= dist_extra;
-                    bit_cnt -= dist_extra;
+                    dist += static_cast<int>(
+                        static_cast<uint32_t>(bits_lo) & ((1u << dist_extra) - 1));
+                    acc_consume(bits_lo, bits_hi, bit_cnt, dist_extra);
                 }
 
-                /* Bounds check */
                 if (out + match_len > out_end) goto done;
                 if (static_cast<ptrdiff_t>(dist) > out - out_buf) goto done;
 
                 copy_match(out, static_cast<size_t>(dist), static_cast<size_t>(match_len));
                 out += match_len;
+
+                /* After match, bit_cnt may still be >> 63 (from 128-bit accumulator).
+                 * Falling through to the for-loop top with bit_cnt > 63 causes Load 1
+                 * to execute `bits_lo |= w << bit_cnt` with UB shift (ARM64: wrong).
+                 * Skip Load 1 if we still have enough bits for another full decode. */
+                if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1)) goto decode_symbol;
             }
         }
 
-        /* Stop if no longer in "safe" region */
         if (out > safe_out_end || src + 8 > src_end)
             goto done;
     }
 
 done:
-    br.restore(src, bits, bit_cnt);
+    /*
+     * Compact 128-bit accumulator back to ≤56 bits for BitReader restore.
+     *
+     * If bit_cnt > 56: bits [56..bit_cnt-1] were pre-loaded but not consumed.
+     * Rewind src by ceil((bit_cnt-56)/8) bytes so the slow path re-reads them.
+     * Then bit_cnt' = bit_cnt - rewind_bytes*8 is in [48..56].
+     *
+     * bits_lo[0..bit_cnt'-1] retain the correct stream bits (the low bits of the
+     * 128-bit accumulator after all consume operations).  bits [bit_cnt'..63] of
+     * bits_lo hold overflow from the load ops — they match the bytes that will be
+     * reloaded from the rewound src, so FILL_BITS_MAX's OR is idempotent.
+     */
+    if (bit_cnt > 56) {
+        const int excess      = bit_cnt - 56;
+        const int rewind_bytes = (excess + 7) >> 3;
+        src     -= rewind_bytes;
+        bit_cnt -= rewind_bytes << 3;
+    }
+    /* Clamp to 64-bit BitReader range (bit_cnt should be ≤56 after above) */
+    if (bit_cnt > 63) bit_cnt = 63;
+    if (bit_cnt < 0)  bit_cnt = 0;
+
+    br.restore(src, bits_lo, bit_cnt);
     out_ptr = out;
     return ended;
 }

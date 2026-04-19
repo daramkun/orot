@@ -3,6 +3,9 @@
 #include "formats/zlib_wrapper.hpp"
 #include "formats/gzip_wrapper.hpp"
 #include "simd/simd_dispatch.hpp"
+#if defined(DEFLATE_THREADS_ENABLED)
+#include "decompress/parallel_decompress.hpp"
+#endif
 
 #include <cstring>
 #include <cstdlib>
@@ -86,9 +89,17 @@ deflate_result deflate_decompress(
         return orot::deflate::raw_decompress(src, in_size, dst, out_capacity, actual_out_size);
     case DEFLATE_FORMAT_ZLIB:
         return orot::deflate::zlib_decompress(src, in_size, dst, out_capacity, actual_out_size);
-    case DEFLATE_FORMAT_GZIP:
+    case DEFLATE_FORMAT_GZIP: {
+#if defined(DEFLATE_THREADS_ENABLED)
+        static constexpr size_t PARALLEL_GZIP_THRESHOLD = 256 * 1024;
+        if (in_size >= PARALLEL_GZIP_THRESHOLD) {
+            const deflate_result pr = orot::deflate::parallel_gzip_decompress(
+                src, in_size, dst, out_capacity, actual_out_size);
+            if (pr != DEFLATE_DATA_ERROR) return pr;
+        }
+#endif
         return orot::deflate::gzip_decompress(src, in_size, dst, out_capacity, actual_out_size);
-    }
+    }}
     return DEFLATE_PARAM_ERROR;
 }
 
