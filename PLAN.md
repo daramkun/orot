@@ -11,6 +11,7 @@
 | 스트리밍 압축해제기 (Decompressor, 상태머신) | ✅ |
 | zlib/gzip 래퍼 (whole-buffer) | ✅ |
 | ARM NEON + CRC32 SIMD | ✅ |
+| ARM64 NEON 성능 최적화 (hash 4→8 pos/iter, adler32 16→32 byte/iter, crc32 4× 언롤) | ✅ |
 | 병렬 압축기 (pigz 방식) | ✅ |
 | C API + C++ RAII API | ✅ |
 | 단위 테스트 7/7 통과 | ✅ |
