@@ -14,44 +14,57 @@ namespace orot { namespace deflate {
 /*
  * copy_match: back-copy `len` bytes from `dist` bytes back in output.
  *
- * Fast path: len <= 16, dist >= 16 → single 128-bit NEON load+store (ARM)
- *            or two word loads (scalar fallback).  Always writes 16 bytes
- *            (safe because the caller ensures out + 258 <= out_end).
- * Non-overlapping (len <= dist): single memcpy.
+ * NEON fast paths:
+ *   len ≤ 32, dist ≥ 32 → two 128-bit load+store (always writes 32 bytes).
+ *   len ≤ 16, dist ≥ 16 → single 128-bit load+store (always writes 16 bytes).
+ * Both are safe because the caller ensures out + 258 ≤ out_end; the extra
+ * bytes written past `len` will be overwritten by subsequent decode ops.
+ *
+ * SSE2 fast path: len ≤ 16, dist ≥ 16 → single 128-bit load+store.
+ * Scalar fast path: same condition, two word-sized memcpy calls.
+ *
+ * Non-overlapping (len ≤ dist): single memcpy.
  * dist == 1: RLE memset.
- * Overlapping (dist < len, dist > 1): doubling memcpy, O(log(len/dist)) calls.
+ * Overlapping (dist < len, dist > 1): doubling memcpy, O(log(len/dist)).
  */
 static inline void copy_match(
     uint8_t* out, size_t dist, size_t len) noexcept
 {
-    /* Fast path: short match, guaranteed non-overlapping */
-    if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
 #if defined(DEFLATE_HAS_NEON)
+    if (__builtin_expect(len <= 32 && dist >= 32, 1)) {
+        vst1q_u8(out,      vld1q_u8(out - dist));
+        vst1q_u8(out + 16, vld1q_u8(out - dist + 16));
+        return;
+    }
+    if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
         vst1q_u8(out, vld1q_u8(out - dist));
+        return;
+    }
 #elif defined(DEFLATE_HAS_SSE2)
+    if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
         _mm_storeu_si128(reinterpret_cast<__m128i*>(out),
             _mm_loadu_si128(reinterpret_cast<const __m128i*>(out - dist)));
+        return;
+    }
 #else
+    if (__builtin_expect(len <= 16 && dist >= 16, 1)) {
         uint64_t w0, w1;
         std::memcpy(&w0, out - dist,     8);
         std::memcpy(&w1, out - dist + 8, 8);
         std::memcpy(out,     &w0, 8);
         std::memcpy(out + 8, &w1, 8);
-#endif
         return;
     }
+#endif
     if (len <= dist) {
-        /* Non-overlapping: always safe to memcpy */
         std::memcpy(out, out - dist, len);
         return;
     }
     if (dist == 1) {
-        /* RLE: single-byte repeat */
         std::memset(out, out[-1], len);
         return;
     }
-    /* Overlapping RLE expansion: doubling memcpy.
-     * O(log(len/dist)) calls instead of O(len) byte loop. */
+    /* Overlapping RLE expansion: doubling memcpy, O(log(len/dist)) calls. */
     std::memcpy(out, out - dist, dist);
     size_t filled = dist;
     while (filled + dist <= len) {
@@ -101,6 +114,8 @@ bool inflate_fast(
         {
             uint64_t word;
             std::memcpy(&word, src, 8);
+            /* Prefetch compressed input ~3 refills ahead to hide load latency. */
+            __builtin_prefetch(src + 24, 0, 0);
             bits    |= word << bit_cnt;
             int nb   = (63 - bit_cnt) >> 3;
             src     += nb;
@@ -139,17 +154,20 @@ decode_symbol:;
 
 #if defined(DEFLATE_HAS_NEON)
             /*
-             * 1+3 speculative NEON literal batch.
+             * Nested speculative NEON literal batch: 1+5 (6 symbols) with 1+3 (4) fallback.
              *
-             * We already have e0 (correct, on the dep chain).  Using e0's actual
-             * code length (ebits0) as a stride, speculatively compute three more
-             * primary-table indices — all independent of each other and of future
-             * bit consumption.  The OOO core can issue these three loads in parallel
-             * while we wait for nothing.  NEON then verifies in a single pass that
-             * all three are primary literals with the same code length.
+             * e0 is on the dependency chain (already decoded).  Using ebits0 as stride,
+             * speculatively issue e1..e5 loads — all independent of each other and of
+             * future bit consumption, so the OOO core executes them in parallel.
              *
-             * Condition: e0 was a primary entry (no secondary needed), is a literal,
-             * and bit_cnt >= 4*LITLEN_DECODE_BITS (= 36, covers ebits0 <= 9).
+             * 1+5 attempt (bit_cnt ≥ 54): verifies e1..e5 with two uint32x4_t; uses
+             *   vcreate_u32/vcombine_u32 to build vectors from integer registers without
+             *   a stack round-trip; vminvq_u32 (single UMINV) checks all lanes.
+             *   Outputs 6 bytes as one 64-bit store (safe: 258-byte headroom ensures
+             *   8-byte write is within bounds; advance is only 6).
+             *
+             * 1+3 fallback (bit_cnt ≥ 36): reuses e1..e3 already in flight;
+             *   single uint32x4_t + vminvq_u32; 4-byte store.
              */
             if (__builtin_expect(
                     !had_secondary &&
@@ -157,58 +175,120 @@ decode_symbol:;
                     bit_cnt >= 4 * LITLEN_DECODE_BITS,
                     1)) {
                 static constexpr uint32_t MASK9 = (1u << LITLEN_DECODE_BITS) - 1;
+                const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
+                const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
+
+                /* e1..e3 needed by both 1+5 and 1+3 paths — load them unconditionally. */
                 const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)         & MASK9];
                 const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0))   & MASK9];
                 const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0))   & MASK9];
 
-                /* Verify e1,e2,e3: LITERAL set, SUBTABLE clear, ebits == ebits0.
-                 * Slot arr4[3] = OK so the 4th NEON lane always passes (3 real checks). */
-                const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
-                const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
-                alignas(16) const uint32_t arr4[4] = {e1, e2, e3, OK};
-                const uint32x4_t ev  = vld1q_u32(arr4);
-                const uint32x4_t cmp = vceqq_u32(vandq_u32(ev, vdupq_n_u32(CHECK)),
-                                                  vdupq_n_u32(OK));
-                const uint64x2_t c64 = vreinterpretq_u64_u32(cmp);
+                if (bit_cnt >= 6 * LITLEN_DECODE_BITS) {
+                    /* 1+5: additionally load e4, e5 */
+                    const uint32_t e4 = tables.litlen[static_cast<uint32_t>(bits >> (4 * ebits0)) & MASK9];
+                    const uint32_t e5 = tables.litlen[static_cast<uint32_t>(bits >> (5 * ebits0)) & MASK9];
 
-                if (__builtin_expect(
-                        (vgetq_lane_u64(c64, 0) & vgetq_lane_u64(c64, 1)) == UINT64_MAX,
-                        1)) {
-                    out[0] = static_cast<uint8_t>(e0);
-                    out[1] = static_cast<uint8_t>(e1);
-                    out[2] = static_cast<uint8_t>(e2);
-                    out[3] = static_cast<uint8_t>(e3);
-                    out     += 4;
-                    bits    >>= 4 * ebits0;
-                    bit_cnt -=  4 * ebits0;
-                    if (__builtin_expect(out > safe_out_end, 0)) goto done;
-                    if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
-                        goto decode_symbol;
-                    continue;
+                    const uint32x4_t mask_v = vdupq_n_u32(CHECK);
+                    const uint32x4_t ok_v   = vdupq_n_u32(OK);
+                    /* Build vectors directly from integer registers: no stack store/load */
+                    const uint32x4_t ev0 = vcombine_u32(
+                        vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
+                        vcreate_u32((uint64_t)e3 | ((uint64_t)e4 << 32)));
+                    /* Pad lanes 6-8 with OK so they always pass verification */
+                    const uint32x4_t ev1 = vcombine_u32(
+                        vcreate_u32((uint64_t)e5 | ((uint64_t)OK << 32)),
+                        vdup_n_u32(OK));
+                    const uint32x4_t cmp = vandq_u32(
+                        vceqq_u32(vandq_u32(ev0, mask_v), ok_v),
+                        vceqq_u32(vandq_u32(ev1, mask_v), ok_v));
+
+                    if (__builtin_expect(vminvq_u32(cmp) == UINT32_MAX, 1)) {
+                        /* Pack 6 literal bytes into one 64-bit store (upper 2 bytes = 0,
+                         * overwritten by next decode; safe within 258-byte headroom). */
+                        const uint64_t pack =
+                            (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
+                            ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
+                            ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40);
+                        std::memcpy(out, &pack, 8);
+                        out     += 6;
+                        bits    >>= 6 * ebits0;
+                        bit_cnt -=  6 * ebits0;
+                        if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                        if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                            goto decode_symbol;
+                        continue;
+                    }
+                    /* 1+5 failed: fall through to 1+3 with e1..e3 already in registers */
+                }
+
+                {
+                    /* 1+3 fallback: verify e1..e3; pad lane 4 with OK (always passes). */
+                    const uint32x4_t ev = vcombine_u32(
+                        vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
+                        vcreate_u32((uint64_t)e3 | ((uint64_t)OK << 32)));
+                    const uint32x4_t cmp = vceqq_u32(
+                        vandq_u32(ev, vdupq_n_u32(CHECK)), vdupq_n_u32(OK));
+
+                    if (__builtin_expect(vminvq_u32(cmp) == UINT32_MAX, 1)) {
+                        uint32_t pack4 =
+                            (uint32_t)(uint8_t)e0 | ((uint32_t)(uint8_t)e1 <<  8) |
+                            ((uint32_t)(uint8_t)e2 << 16) | ((uint32_t)(uint8_t)e3 << 24);
+                        std::memcpy(out, &pack4, 4);
+                        out     += 4;
+                        bits    >>= 4 * ebits0;
+                        bit_cnt -=  4 * ebits0;
+                        if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                        if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                            goto decode_symbol;
+                        continue;
+                    }
                 }
             }
 #elif defined(DEFLATE_HAS_SSE2)
+            /*
+             * x86 nested literal batch: same 1+5 + 1+3 structure as NEON,
+             * using scalar bitwise AND for verification (OOO executes in parallel).
+             * Packed 32/64-bit stores replace individual byte writes.
+             */
             if (__builtin_expect(
                     !had_secondary &&
                     (e0 & HUFF_LITERAL_FLAG) &&
                     bit_cnt >= 4 * LITLEN_DECODE_BITS,
                     1)) {
                 static constexpr uint32_t MASK9 = (1u << LITLEN_DECODE_BITS) - 1;
-                const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)       & MASK9];
-                const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0)) & MASK9];
-                const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0)) & MASK9];
-
                 const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
                 const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
+
+                const uint32_t e1 = tables.litlen[static_cast<uint32_t>(bits >> ebits0)         & MASK9];
+                const uint32_t e2 = tables.litlen[static_cast<uint32_t>(bits >> (2 * ebits0))   & MASK9];
+                const uint32_t e3 = tables.litlen[static_cast<uint32_t>(bits >> (3 * ebits0))   & MASK9];
+
+                if (bit_cnt >= 6 * LITLEN_DECODE_BITS) {
+                    const uint32_t e4 = tables.litlen[static_cast<uint32_t>(bits >> (4 * ebits0)) & MASK9];
+                    const uint32_t e5 = tables.litlen[static_cast<uint32_t>(bits >> (5 * ebits0)) & MASK9];
+                    if (__builtin_expect(
+                            ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) & ((e3 & CHECK) == OK) &
+                            ((e4 & CHECK) == OK) & ((e5 & CHECK) == OK), 1)) {
+                        const uint64_t pack =
+                            (uint64_t)(uint8_t)e0 | ((uint64_t)(uint8_t)e1 <<  8) |
+                            ((uint64_t)(uint8_t)e2 << 16) | ((uint64_t)(uint8_t)e3 << 24) |
+                            ((uint64_t)(uint8_t)e4 << 32) | ((uint64_t)(uint8_t)e5 << 40);
+                        std::memcpy(out, &pack, 8);
+                        out     += 6;
+                        bits    >>= 6 * ebits0;
+                        bit_cnt -=  6 * ebits0;
+                        if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                        if (__builtin_expect(bit_cnt >= LITLEN_DECODE_BITS, 1))
+                            goto decode_symbol;
+                        continue;
+                    }
+                }
                 if (__builtin_expect(
-                        ((e1 & CHECK) == OK) &
-                        ((e2 & CHECK) == OK) &
-                        ((e3 & CHECK) == OK),
-                        1)) {
-                    out[0] = static_cast<uint8_t>(e0);
-                    out[1] = static_cast<uint8_t>(e1);
-                    out[2] = static_cast<uint8_t>(e2);
-                    out[3] = static_cast<uint8_t>(e3);
+                        ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) & ((e3 & CHECK) == OK), 1)) {
+                    uint32_t pack4 =
+                        (uint32_t)(uint8_t)e0 | ((uint32_t)(uint8_t)e1 <<  8) |
+                        ((uint32_t)(uint8_t)e2 << 16) | ((uint32_t)(uint8_t)e3 << 24);
+                    std::memcpy(out, &pack4, 4);
                     out     += 4;
                     bits    >>= 4 * ebits0;
                     bit_cnt -=  4 * ebits0;
