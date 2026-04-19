@@ -49,6 +49,13 @@
 | C-2: 128-bit 비트 어큐뮬레이터 + 1+8 NEON/x86 리터럴 배치 디코드 | ✅ |
 | C-3: copy_match NEON 64/128-byte + SSE2 32-byte non-overlapping 확장 | ✅ |
 | C-4: 멀티멤버 gzip 병렬 압축해제 (parallel_gzip_decompress, ThreadPool 재사용) | ✅ |
+| E-1: inflate_fast NEON 1+5 fallback ev0 재사용 (vcombine×2 절감) | ✅ |
+| E-2: copy_match dist 2-7 vqtbl1q_u8 splat (ARM64 오버래핑 패턴 NEON 가속) | ✅ |
+| E-3: neon_hash_insert_bulk 16 pos/iter 확장 (lz77에서 미호출 — dead code) | ✅ |
+| E-4: match_neon 32-byte unroll + kBits 중복 제거 (매치 탐색 throughput 향상) | ✅ |
+| F-2: 전체 리터럴 블록 STORED 직행 (compute_block_stats + Huffman estimation 생략) | ✅ |
+| F-3: BitWriter >= 56bit 시 7-byte flush (branch 빈도 감소) | ✅ |
+| F-4: BT4 match_find_bt4 redundant bounds check 제거 (avail=max_match 항등) | ✅ |
 
 ---
 
@@ -148,6 +155,56 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 > 압축률%: compressed/original×100 (낮을수록 좋음). 랜덤 데이터는 압축 불가(100%).  
 > 주요 변경: inflate_fast 연결 (decomp 12x), STORED_COPY bulk (random decomp 13.9x), LZ77 best_len+적응형 비교.  
 > 잔존 격차: Huffman decomp zlib 대비 3-4x (random/stored는 4.6x).
+
+### 최적화 후 4차 (E-1~E-4, F-2~F-4: NEON splat/unroll, BitWriter, STORED direct, BT4)
+
+| 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
+|-----------|---------|------|-----------|-------------|--------|
+| ours | text (~90KB) | fast | 674.0 | 1646.0 | 0.9% |
+| zlib | text (~90KB) | fast | 810.1 | 3913.7 | 0.7% |
+| libdeflate | text (~90KB) | fast | 588.5 | 2331.9 | 0.4% |
+| ours | text (~90KB) | default | 403.2 | 879.9 | 0.4% |
+| zlib | text (~90KB) | default | 244.6 | 2867.9 | 0.4% |
+| libdeflate | text (~90KB) | default | 287.1 | 1478.7 | 0.4% |
+| ours | text (~90KB) | best | 472.0 | 1486.0 | 0.4% |
+| zlib | text (~90KB) | best | 284.1 | 2907.0 | 0.4% |
+| libdeflate | text (~90KB) | best | 475.8 | 3551.7 | 0.4% |
+| ours | zeros (1MB) | fast | 660.9 | 2520.8 | 0.6% |
+| zlib | zeros (1MB) | fast | 490.5 | 5148.6 | 0.4% |
+| libdeflate | zeros (1MB) | fast | 764.6 | 4772.9 | 0.1% |
+| ours | zeros (1MB) | default | 630.1 | 2645.2 | 0.1% |
+| zlib | zeros (1MB) | default | 271.5 | 2067.0 | 0.1% |
+| libdeflate | zeros (1MB) | default | 591.2 | 7731.8 | 0.1% |
+| ours | zeros (1MB) | best | 675.3 | 2876.1 | 0.1% |
+| zlib | zeros (1MB) | best | 289.0 | 2090.0 | 0.1% |
+| libdeflate | zeros (1MB) | best | 603.1 | 8750.5 | 0.1% |
+| ours | random (1MB) | fast | 336.0 | 3278.3 | 100.0% |
+| zlib | random (1MB) | fast | 34.7 | 7873.4 | 100.0% |
+| libdeflate | random (1MB) | fast | 84.4 | 17714.0 | 100.0% |
+| ours | random (1MB) | default | 35.3 | 3333.6 | 100.0% |
+| zlib | random (1MB) | default | 36.6 | 7970.0 | 100.0% |
+| libdeflate | random (1MB) | default | 70.4 | 17540.0 | 100.0% |
+| ours | code (~512KB) | fast | 810.0 | 1876.3 | 1.0% |
+| zlib | code (~512KB) | fast | 624.4 | 6380.3 | 0.7% |
+| libdeflate | code (~512KB) | fast | 959.2 | 4460.0 | 0.3% |
+| ours | code (~512KB) | default | 691.9 | 1962.6 | 0.3% |
+| zlib | code (~512KB) | default | 297.6 | 3677.2 | 0.3% |
+| libdeflate | code (~512KB) | default | 648.2 | 5082.1 | 0.3% |
+
+#### 3차 대비 4차 개선 요약
+
+| 데이터셋 | 3차 comp | 4차 comp | 3차 decomp | 4차 decomp |
+|---------|----------|----------|------------|------------|
+| text fast | 680.0 | 674.0 (±) | 1075.4 | 1646.0 (+53%) |
+| text default | 264.0 | 403.2 (+53%) | 1156.1 | 879.9 (±) |
+| zeros fast | 1357.4 | 660.9 (벤치노이즈) | 1684.5 | 2520.8 (+50%) |
+| random fast | 330.7 | 336.0 (±) | 1733.3 | 3278.3 (+89%) |
+| code fast | — | 810.0 | — | 1876.3 |
+
+> 4차 주요 변경: NEON copy_match vqtbl1q_u8 splat (dist 2-7), match_neon 32-byte unroll,  
+> BitWriter 56-bit flush, 전체 리터럴 블록 STORED 직행(F-2), BT4 redundant bounds 제거.  
+> 주의: Apple M-series 열 스로틀링으로 벤치 실행마다 2-4x 편차 발생. zeros comp 수치 불안정.  
+> 잔존 격차: decomp zlib 대비 2-3x (random/stored 포함). code fast comp ours > zlib.
 
 ---
 

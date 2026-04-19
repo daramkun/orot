@@ -90,6 +90,31 @@ static inline void copy_match(
         std::memset(out, out[-1], len);
         return;
     }
+#if defined(__aarch64__)
+    /* dist 2..7 overlapping: splat the pattern via vqtbl1q_u8 and store 16B at a time. */
+    if (__builtin_expect(dist <= 7, 0)) {
+        static const uint8_t tbl_idx[6][16] = {
+            {0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1},       /* dist=2 */
+            {0,1,2,0,1,2,0,1,2,0,1,2,0,1,2,0},       /* dist=3 */
+            {0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3},       /* dist=4 */
+            {0,1,2,3,4,0,1,2,3,4,0,1,2,3,4,0},       /* dist=5 */
+            {0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3},       /* dist=6 */
+            {0,1,2,3,4,5,6,0,1,2,3,4,5,6,0,1},       /* dist=7 */
+        };
+        const uint8x16_t src = vld1q_u8(out - dist);
+        const uint8x16_t idx = vld1q_u8(tbl_idx[dist - 2]);
+        const uint8x16_t pat = vqtbl1q_u8(src, idx);
+        size_t done = 0;
+        for (; done + 16 <= len; done += 16)
+            vst1q_u8(out + done, pat);
+        if (done < len) {
+            uint8_t tmp[16];
+            vst1q_u8(tmp, pat);
+            std::memcpy(out + done, tmp, len - done);
+        }
+        return;
+    }
+#endif
     std::memcpy(out, out - dist, dist);
     size_t filled = dist;
     while (filled + dist <= len) {
@@ -276,14 +301,12 @@ decode_symbol:;
 
                 /* 1+8 failed: try 1+5 */
                 if (__builtin_expect(bit_cnt >= 6 * LITLEN_DECODE_BITS, 1)) {
-                    const uint32x4_t ev2 = vcombine_u32(
-                        vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
-                        vcreate_u32((uint64_t)e3 | ((uint64_t)e4 << 32)));
+                    /* ev0 == {e1,e2,e3,e4} — reuse instead of rebuilding ev2 */
                     const uint32x4_t ev3 = vcombine_u32(
                         vcreate_u32((uint64_t)e5 | ((uint64_t)OK << 32)),
                         vdup_n_u32(OK));
                     const uint32x4_t cmp2 = vandq_u32(
-                        vceqq_u32(vandq_u32(ev2, mask_v), ok_v),
+                        vceqq_u32(vandq_u32(ev0, mask_v), ok_v),
                         vceqq_u32(vandq_u32(ev3, mask_v), ok_v));
                     if (__builtin_expect(vminvq_u32(cmp2) == UINT32_MAX, 1)) {
                         const uint64_t pack6 =

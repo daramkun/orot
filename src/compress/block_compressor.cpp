@@ -46,7 +46,14 @@ size_t BlockCompressor::compress(
 
     /* DEFLATE encode */
     BitWriter bw(dst, dst_capacity);
-    encode_block(tokens, n_tokens, src, src_len, bw, is_last, cfg_.block_hint);
+
+    /* All-literal: stored block is always cheaper than fixed/dynamic.
+     * Skip block stats and Huffman estimation entirely. */
+    if (n_tokens == src_len && cfg_.block_hint != BlockTypeHint::Stored) {
+        emit_stored_block(src, src_len, bw, is_last);
+    } else {
+        encode_block(tokens, n_tokens, src, src_len, bw, is_last, cfg_.block_hint);
+    }
 
     const size_t out_bytes = bw.bytes_written();
     if (bw.pending_bits() > 0) {

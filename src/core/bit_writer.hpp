@@ -29,14 +29,22 @@ public:
         assert(bit_count_ + count <= 64);
         bits_      |= (static_cast<uint64_t>(value) & ((1ULL << count) - 1)) << bit_count_;
         bit_count_ += count;
-        /* Flush exactly 4 bytes when the accumulator has at least 32 bits.
-         * Fixed-size store is cheaper than the variable-length flush. */
+        /* Flush when accumulator has at least 32 bits.
+         * If >= 56 bits accumulated, write 7 bytes at once to halve flush frequency
+         * when two large symbols arrive back-to-back without an intervening flush. */
         if (bit_count_ >= 32) {
-            assert(ptr_ + 4 <= dst_ + cap_);
-            std::memcpy(ptr_, &bits_, 4);
-            ptr_       += 4;
-            bits_      >>= 32;
-            bit_count_ -= 32;
+            assert(ptr_ + 7 <= dst_ + cap_);
+            if (__builtin_expect(bit_count_ >= 56, 0)) {
+                std::memcpy(ptr_, &bits_, 7);
+                ptr_       += 7;
+                bits_      >>= 56;
+                bit_count_ -= 56;
+            } else {
+                std::memcpy(ptr_, &bits_, 4);
+                ptr_       += 4;
+                bits_      >>= 32;
+                bit_count_ -= 32;
+            }
         }
     }
 

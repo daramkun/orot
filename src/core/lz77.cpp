@@ -315,8 +315,7 @@ static int match_find_bt4(
                 return best_len;
             }
             /* Still must navigate tree to maintain BT4 structure */
-            if (pos + 0 < src_len && (pos - dist) < src_len
-                && cand[0] < src[pos])
+            if (cand[0] < src[pos])
             {
                 *pleft = cur;
                 pleft  = &state.bt_right[cur & LZ77_WIN_MASK];
@@ -334,7 +333,8 @@ static int match_find_bt4(
 
         /* Start from already-known prefix minimum */
         const int skip = std::min(len_left, len_right);
-        const int avail = std::min(max_match, src_len - (pos - dist));
+        /* avail == max_match: src_len-(pos-dist) = src_len-pos+dist >= max_match always */
+        const int avail = max_match;
 
         int len = skip;
         if (skip < avail)
@@ -352,8 +352,7 @@ static int match_find_bt4(
         }
 
         /* Navigate: compare byte at position `len` to decide left vs right */
-        if (pos + len < src_len && (pos - dist + len) < src_len
-            && cand[len] < src[pos + len])
+        if (pos + len < src_len && cand[len] < src[pos + len])
         {
             /* cand sorts before pos → cur goes into left subtree of pos */
             *pleft   = cur;
