@@ -300,14 +300,14 @@ decode_symbol:;
                     e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
                 }
 
-                const uint32x4_t mask_v = vdupq_n_u32(CHECK);
-                const uint32x4_t ok_v   = vdupq_n_u32(OK);
                 const uint32x4_t ev0 = vcombine_u32(
                     vcreate_u32((uint64_t)e1 | ((uint64_t)e2 << 32)),
                     vcreate_u32((uint64_t)e3 | ((uint64_t)e4 << 32)));
                 const uint32x4_t ev1 = vcombine_u32(
                     vcreate_u32((uint64_t)e5 | ((uint64_t)e6 << 32)),
                     vcreate_u32((uint64_t)e7 | ((uint64_t)e8 << 32)));
+                const uint32x4_t mask_v = vdupq_n_u32(CHECK);
+                const uint32x4_t ok_v   = vdupq_n_u32(OK);
                 const uint32x4_t cmp = vandq_u32(
                     vceqq_u32(vandq_u32(ev0, mask_v), ok_v),
                     vceqq_u32(vandq_u32(ev1, mask_v), ok_v));
@@ -330,7 +330,7 @@ decode_symbol:;
 
                 /* 1+8 failed: try 1+5 */
                 if (__builtin_expect(bit_cnt >= 6 * LITLEN_DECODE_BITS, 1)) {
-                    /* ev0 == {e1,e2,e3,e4} — reuse instead of rebuilding ev2 */
+                    /* ev0 == {e1,e2,e3,e4} — reuse instead of rebuilding */
                     const uint32x4_t ev3 = vcombine_u32(
                         vcreate_u32((uint64_t)e5 | ((uint64_t)OK << 32)),
                         vdup_n_u32(OK));

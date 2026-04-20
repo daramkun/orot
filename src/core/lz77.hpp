@@ -51,6 +51,7 @@ struct LZ77Config {
     bool bt4;            /* use binary-tree match finder (level 10+) */
     bool fast_path;      /* L1-L3: head-only lookup, skip prev[], skip covered-pos hashing */
     int  hash_bits;      /* runtime hash table bits: 12 (L1), 14 (L2-3), 16 (L4+) */
+    int  miss_limit;     /* consecutive 4-byte misses before chain abandon (K-1,K-2) */
 };
 
 LZ77Config lz77_config_for_level(int level);

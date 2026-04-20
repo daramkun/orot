@@ -63,6 +63,8 @@
 | I-1: inflate_fast prev_ebits0 투기적 스트라이드 로드 (sg1~sg8 사전 발행, L1 latency 은닉) | ✅ |
 | I-2: Decompressor 증분 Adler-32 (STORED 블록 adler_exact 추적, Huffman 재계산 회피) | ✅ |
 | I-3: raw_decompress_ex + zlib_wrapper adler_exact 경로 (STORED-only 스트림 Adler 재계산 제거) | ✅ |
+| J-1: match_find 4-byte 미스 카운트 전환 (첫 바이트→4바이트 단위 consec_misses, 고엔트로피 체인 조기 종료) | ✅ |
+| J-2: 레벨별 miss_limit 차등 적용 (L4-6: 5, L7-9: 6, L10-12: 8) | ✅ |
 
 ---
 
@@ -241,8 +243,10 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 
 > 5차 주요 변경: H-1(inflate_fast 오버래핑 더블링), H-2(neon_adler32 64B/iter 5-acc),  
 > H-3(post-inflate_fast 윈도우 싱크 history<WIN_SIZE 조건부), H-4(DIST_DECODE_BITS 8→11),  
-> I-1(prev_ebits0 투기 로드), I-2(증분 Adler-32), I-3(raw_decompress_ex).  
-> random decomp zlib(8224 MB/s) 초월. zeros decomp zlib 96%. text/code 여전히 격차 존재.
+> I-1(prev_ebits0 투기 로드), I-2(증분 Adler-32), I-3(raw_decompress_ex),  
+> J-1+J-2(match_find 4-byte 미스 카운트 + 레벨별 miss_limit).  
+> random decomp zlib 초월. random default comp 62.9 MB/s(zlib 35.4 초월, libdeflate 70.9 근접).  
+> random best comp 52.1 MB/s(zlib 35.4 초월). text/code decomp 여전히 격차 존재.
 
 ---
 

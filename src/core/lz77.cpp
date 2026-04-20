@@ -16,19 +16,19 @@ LZ77Config lz77_config_for_level(int level) {
     /* fast_path=true: head-only lookup (no chain), smaller hash table */
     /* hash_bits: 12 (L1=4KB), 14 (L2-3=32KB), 16 (L4+=128KB head[]) */
     static const LZ77Config configs[13] = {
-        /* 0  store  */ {0,    0,   0, false, false, 16},
-        /* 1  fast   */ {1,   32,  0, false, true,  12},
-        /* 2         */ {16,  64,  0, false, true,  14},
-        /* 3         */ {32,  128, 0, false, true,  14},
-        /* 4  def    */ {64,  128, 1, false, false, 16},
-        /* 5         */ {128, 128, 1, false, false, 16},
-        /* 6         */ {128, 258, 1, false, false, 16},
-        /* 7  better */ {256, 258, 2, false, false, 16},
-        /* 8         */ {512, 258, 2, false, false, 16},
-        /* 9         */ {768, 258, 3, false, false, 16},
-        /* 10 best   */ {1024,258, 4, true,  false, 16},
-        /* 11        */ {2048,258, 4, true,  false, 16},
-        /* 12        */ {4096,258, 4, true,  false, 16},
+        /* 0  store  */ {0,    0,   0, false, false, 16, 8},
+        /* 1  fast   */ {1,   32,   0, false, true,  12, 8},
+        /* 2         */ {16,  64,   0, false, true,  14, 8},
+        /* 3         */ {32,  128,  0, false, true,  14, 8},
+        /* 4  def    */ {64,  128,  1, false, false, 16, 5},
+        /* 5         */ {128, 128,  1, false, false, 16, 5},
+        /* 6         */ {128, 258,  1, false, false, 16, 5},
+        /* 7  better */ {256, 258,  2, false, false, 16, 6},
+        /* 8         */ {512, 258,  2, false, false, 16, 6},
+        /* 9         */ {768, 258,  3, false, false, 16, 6},
+        /* 10 best   */ {1024,258,  4, true,  false, 16, 8},
+        /* 11        */ {2048,258,  4, true,  false, 16, 8},
+        /* 12        */ {4096,258,  4, true,  false, 16, 8},
     };
     if (level < 0)  level = 0;
     if (level > 12) level = 12;
@@ -111,27 +111,40 @@ static int match_find(
     const uint32_t h   = lz77_hash4(src + pos) & LZ77_HASH_MASK;
     uint32_t cur       = state.head[h];
     int      steps     = cfg.max_chain;
-    /* Consecutive first-byte miss counter: if 8 candidates in a row fail the
-     * first-byte check, the chain is high-entropy and further traversal is
-     * wasteful.  8 is chosen to avoid false positives on structured data while
-     * cutting chain work to ≤8 steps for truly random input. */
+    /* Consecutive 4-byte miss counter: if candidates in a row fail the
+     * 4-byte check, the chain is high-entropy; abort early.
+     * miss_limit is tuned per level: lower for L4-6 (faster for random),
+     * higher for L10-12 (BT4 handles separately). */
     int consec_misses  = 0;
 
     while (steps-- > 0 && cur != 0) {
         const int dist = (pos - static_cast<int>(cur)) & LZ77_WIN_MASK;
         if (dist == 0 || dist > LZ77_WIN_SIZE) break;
 
-        /* Quick first-byte check before full compare */
-        if (src[cur] != src[pos]) {
-            if (__builtin_expect(++consec_misses >= 8, 0)) break;
-            cur = state.prev[cur & LZ77_WIN_MASK];
-            continue;
+        /* 4-byte quick reject: catches high-entropy chains faster than first-byte.
+         * Falls back to single-byte check near end of input. */
+        {
+            const uint8_t* cand = src + pos - dist;
+            const uint8_t* ref  = src + pos;
+            bool mismatch;
+            if (__builtin_expect(pos + 3 < src_len, 1)) {
+                uint32_t cv, rv;
+                __builtin_memcpy(&cv, cand, 4);
+                __builtin_memcpy(&rv, ref,  4);
+                mismatch = (cv != rv);
+            } else {
+                mismatch = (cand[0] != ref[0]);
+            }
+            if (mismatch) {
+                if (__builtin_expect(++consec_misses >= cfg.miss_limit, 0)) break;
+                cur = state.prev[cur & LZ77_WIN_MASK];
+                continue;
+            }
         }
         consec_misses = 0;
 
         /* Adaptive-width early reject: widen the comparison as best_len grows.
-         * Checks bytes 0..N at the candidate start before calling the SIMD
-         * match function.  Unaligned loads are safe on x86/ARM. */
+         * 4-byte case already handled above; only 8-byte check is needed here. */
         {
             const uint8_t* cand = src + pos - dist;
             const uint8_t* ref  = src + pos;
@@ -139,14 +152,6 @@ static int match_find(
                 uint64_t cv, rv;
                 __builtin_memcpy(&cv, cand, 8);
                 __builtin_memcpy(&rv, ref,  8);
-                if (cv != rv) {
-                    cur = state.prev[cur & LZ77_WIN_MASK];
-                    continue;
-                }
-            } else if (best_len >= 4 && pos + 3 < src_len) {
-                uint32_t cv, rv;
-                __builtin_memcpy(&cv, cand, 4);
-                __builtin_memcpy(&rv, ref,  4);
                 if (cv != rv) {
                     cur = state.prev[cur & LZ77_WIN_MASK];
                     continue;
@@ -296,9 +301,9 @@ static int match_find_bt4(
     int len_right = 0;
 
     int steps = cfg.max_chain;
-    /* Consecutive first-byte miss counter: BT4 still must navigate the tree
-     * even on misses (to maintain structural correctness), but we abort after
-     * 8 consecutive misses since the chain is high-entropy. */
+    /* Consecutive first-byte miss counter: BT4 must navigate the tree even on
+     * misses (structural correctness), but aborts after miss_limit consecutive
+     * misses since the chain is high-entropy. */
     int consec_misses = 0;
 
     while (steps-- > 0 && cur != 0) {
@@ -310,7 +315,7 @@ static int match_find_bt4(
         /* Fast first-byte check: if mismatch, navigate tree without calling
          * the full match function, and count consecutive misses. */
         if (cand[0] != src[pos]) {
-            if (__builtin_expect(++consec_misses >= 8, 0)) {
+            if (__builtin_expect(++consec_misses >= cfg.miss_limit, 0)) {
                 *pleft = 0; *pright = 0;
                 return best_len;
             }
