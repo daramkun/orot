@@ -64,21 +64,27 @@ deflate_result zlib_decompress(
         return DEFLATE_DATA_ERROR;
     if (src[1] & 0x20) return DEFLATE_DATA_ERROR;  /* no preset dict support */
 
-    /* Decompress */
-    const deflate_result r = raw_decompress(
+    /* Decompress — retrieve incremental adler when available (STORED-only streams) */
+    uint32_t inc_adler  = 1;
+    bool     adler_exact = false;
+    const deflate_result r = raw_decompress_ex(
         src + 2, src_len - 6,
         dst, dst_capacity,
-        actual_out_size);
+        actual_out_size,
+        &inc_adler, &adler_exact);
     if (r != DEFLATE_OK) return r;
 
-    /* Verify Adler-32 */
+    /* Verify Adler-32: use incremental value for STORED-only streams,
+     * recompute over output for Huffman streams. */
     const uint8_t* trailer = src + src_len - 4;
     const uint32_t expected =
           (static_cast<uint32_t>(trailer[0]) << 24)
         | (static_cast<uint32_t>(trailer[1]) << 16)
         | (static_cast<uint32_t>(trailer[2]) <<  8)
         |  static_cast<uint32_t>(trailer[3]);
-    const uint32_t actual = simd_adler32_fn()(1, dst, *actual_out_size);
+    const uint32_t actual = adler_exact
+        ? inc_adler
+        : simd_adler32_fn()(1, dst, *actual_out_size);
     if (actual != expected) return DEFLATE_DATA_ERROR;
 
     return DEFLATE_OK;

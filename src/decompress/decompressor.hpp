@@ -86,6 +86,17 @@ private:
     const uint8_t* out_origin_       = nullptr; // start of first output buffer
     uint8_t*       out_expected_end_ = nullptr; // expected next_out at next call start
 
+    /* Incremental Adler-32 over output bytes.
+     * adler_exact_ = true  → adler_ is accurate (only STORED blocks produced).
+     * adler_exact_ = false → Huffman blocks produced; caller must recompute. */
+    uint32_t adler_       = 1;
+    bool     adler_exact_ = true;
+
+public:
+    uint32_t adler()       const noexcept { return adler_; }
+    bool     adler_exact() const noexcept { return adler_exact_; }
+
+private:
     /* Helpers */
     bool build_tables_from_combined();
     void sync_window_from_buf(const uint8_t* buf_start, size_t len) noexcept;

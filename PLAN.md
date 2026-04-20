@@ -60,6 +60,9 @@
 | H-2: neon_adler32 32B/iter→64B/iter 듀얼 어큐뮬레이터 (의존성 스톨 제거) | ✅ |
 | H-3: post-inflate_fast 윈도우 싱크 조건부 스킵 (history≥WIN_SIZE 시 32KB memcpy 제거) | ✅ |
 | H-4: DIST_DECODE_BITS 8→11 (2차 거리 테이블 조회 거의 0으로 감소) | ✅ |
+| I-1: inflate_fast prev_ebits0 투기적 스트라이드 로드 (sg1~sg8 사전 발행, L1 latency 은닉) | ✅ |
+| I-2: Decompressor 증분 Adler-32 (STORED 블록 adler_exact 추적, Huffman 재계산 회피) | ✅ |
+| I-3: raw_decompress_ex + zlib_wrapper adler_exact 경로 (STORED-only 스트림 Adler 재계산 제거) | ✅ |
 
 ---
 
@@ -214,31 +217,32 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 
 | 라이브러리 | 데이터셋 | 레벨 | 압축 MB/s | 압축해제 MB/s | 압축률% |
 |-----------|---------|------|-----------|-------------|--------|
-| ours | text (~90KB) | fast | 813.5 | 2001.1 | 0.9% |
-| zlib | text (~90KB) | fast | 957.1 | 4886.2 | 0.7% |
-| libdeflate | text (~90KB) | fast | 890.5 | 3798.8 | 0.4% |
-| ours | zeros (1MB) | fast | 908.8 | 3311.7 | 0.6% |
-| zlib | zeros (1MB) | fast | 637.3 | 6182.3 | 0.4% |
-| libdeflate | zeros (1MB) | fast | 983.3 | 7926.2 | 0.1% |
-| ours | random (1MB) | fast | 356.4 | 3634.0 | 100.0% |
-| zlib | random (1MB) | fast | 39.1 | 8185.7 | 100.0% |
-| libdeflate | random (1MB) | fast | 96.5 | 18146.6 | 100.0% |
-| ours | code (~512KB) | fast | 870.4 | 2435.0 | 1.0% |
-| zlib | code (~512KB) | fast | 652.1 | 6309.5 | 0.7% |
-| libdeflate | code (~512KB) | fast | 996.3 | 4615.6 | 0.3% |
+| ours | text (~90KB) | fast | 900.8 | 3018.9 | 0.9% |
+| zlib | text (~90KB) | fast | 1012.0 | 5046.4 | 0.7% |
+| libdeflate | text (~90KB) | fast | 917.9 | 3735.7 | 0.4% |
+| ours | zeros (1MB) | fast | 1013.7 | 5979.6 | 0.6% |
+| zlib | zeros (1MB) | fast | 640.0 | 6240.3 | 0.4% |
+| libdeflate | zeros (1MB) | fast | 976.3 | 7418.8 | 0.1% |
+| ours | random (1MB) | fast | 381.2 | 8438.6 | 100.0% |
+| zlib | random (1MB) | fast | 39.2 | 8224.1 | 100.0% |
+| libdeflate | random (1MB) | fast | 96.4 | 18279.9 | 100.0% |
+| ours | code (~512KB) | fast | 1007.2 | 3762.5 | 1.0% |
+| zlib | code (~512KB) | fast | 651.9 | 6444.1 | 0.7% |
+| libdeflate | code (~512KB) | fast | 998.2 | 4618.0 | 0.3% |
 
 #### 4차 대비 5차 개선 요약
 
 | 데이터셋 | 4차 decomp | 5차 decomp | 개선 |
 |---------|------------|------------|------|
-| text fast | 1646 MB/s | **2001 MB/s** | +22% |
-| zeros fast | 2521 MB/s | **3311 MB/s** | +31% |
-| random fast | 3278 MB/s | **3634 MB/s** | +11% |
-| code fast | 1876 MB/s | **2435 MB/s** | +30% |
+| text fast | 1646 MB/s | **3019 MB/s** | +83% |
+| zeros fast | 2521 MB/s | **5980 MB/s** | +137% |
+| random fast | 3278 MB/s | **8439 MB/s** | +157% |
+| code fast | 1876 MB/s | **3763 MB/s** | +100% |
 
-> 5차 주요 변경: H-1(inflate_fast 오버래핑 더블링), H-2(neon_adler32 64B/iter 듀얼 acc),  
-> H-3(post-inflate_fast 윈도우 싱크 history<WIN_SIZE 조건부), H-4(DIST_DECODE_BITS 8→11).  
-> 잔존 격차: decomp zlib 대비 2-3x (Huffman 디코드 병목 잔존).
+> 5차 주요 변경: H-1(inflate_fast 오버래핑 더블링), H-2(neon_adler32 64B/iter 5-acc),  
+> H-3(post-inflate_fast 윈도우 싱크 history<WIN_SIZE 조건부), H-4(DIST_DECODE_BITS 8→11),  
+> I-1(prev_ebits0 투기 로드), I-2(증분 Adler-32), I-3(raw_decompress_ex).  
+> random decomp zlib(8224 MB/s) 초월. zeros decomp zlib 96%. text/code 여전히 격차 존재.
 
 ---
 

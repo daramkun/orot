@@ -184,6 +184,11 @@ bool inflate_fast(
      * Use 56 for alignment with the 7-byte standard refill quantum. */
     static constexpr int MIN_DECODE_BITS = 56;
 
+    /* Stride speculation: remember previous batch's code length.
+     * Pre-issue litlen loads with prev_ebits0 before e0 resolves, hiding the
+     * e0 → ebits0 → index dependency (~4-cycle L1 latency) on spec-hit. */
+    int prev_ebits0 = LITLEN_DECODE_BITS;
+
     for (;;) {
         /*
          * 128-bit refill — two sequential 8-byte loads.
@@ -232,6 +237,21 @@ decode_symbol:;
                 static_cast<uint32_t>(bits_lo) & ACC_MASK11;
             uint32_t e0 = tables.litlen[e0_idx];
 
+#if defined(DEFLATE_HAS_NEON) || defined(DEFLATE_HAS_SSE2)
+            /* Speculative stride loads: pre-issue e1..e8 with prev_ebits0 before
+             * e0's result is needed.  On spec-hit (prev == actual ebits0), all 9
+             * loads complete in parallel (~4 cycles) instead of sequentially
+             * (4 + 4 cycles).  Spec-miss: reload with correct stride below. */
+            const uint32_t sg1 = tables.litlen[acc_extract(bits_lo, bits_hi, 1*prev_ebits0)];
+            const uint32_t sg2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*prev_ebits0)];
+            const uint32_t sg3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*prev_ebits0)];
+            const uint32_t sg4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*prev_ebits0)];
+            const uint32_t sg5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*prev_ebits0)];
+            const uint32_t sg6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*prev_ebits0)];
+            const uint32_t sg7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*prev_ebits0)];
+            const uint32_t sg8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*prev_ebits0)];
+#endif
+
             const bool had_secondary = !!(e0 & HUFF_SUBTABLE_FLAG);
             if (__builtin_expect(had_secondary, 0)) {
                 const int sec_bits   = static_cast<int>((e0 >> 16) & 0xFF);
@@ -262,14 +282,23 @@ decode_symbol:;
                 const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
                 const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
 
-                const uint32_t e1 = tables.litlen[acc_extract(bits_lo, bits_hi,   ebits0)];
-                const uint32_t e2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*ebits0)];
-                const uint32_t e3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*ebits0)];
-                const uint32_t e4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*ebits0)];
-                const uint32_t e5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*ebits0)];
-                const uint32_t e6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*ebits0)];
-                const uint32_t e7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*ebits0)];
-                const uint32_t e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
+                uint32_t e1, e2, e3, e4, e5, e6, e7, e8;
+                if (__builtin_expect(ebits0 == prev_ebits0, 1)) {
+                    /* Spec-hit: use pre-loaded values (already in registers). */
+                    e1 = sg1; e2 = sg2; e3 = sg3; e4 = sg4;
+                    e5 = sg5; e6 = sg6; e7 = sg7; e8 = sg8;
+                } else {
+                    /* Spec-miss: reload with correct stride, update for next batch. */
+                    prev_ebits0 = ebits0;
+                    e1 = tables.litlen[acc_extract(bits_lo, bits_hi,   ebits0)];
+                    e2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*ebits0)];
+                    e3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*ebits0)];
+                    e4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*ebits0)];
+                    e5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*ebits0)];
+                    e6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*ebits0)];
+                    e7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*ebits0)];
+                    e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
+                }
 
                 const uint32x4_t mask_v = vdupq_n_u32(CHECK);
                 const uint32x4_t ok_v   = vdupq_n_u32(OK);
@@ -356,14 +385,21 @@ decode_symbol:;
                 const uint32_t CHECK = HUFF_LITERAL_FLAG | HUFF_SUBTABLE_FLAG | (0xFFu << 16);
                 const uint32_t OK    = HUFF_LITERAL_FLAG | (static_cast<uint32_t>(ebits0) << 16);
 
-                const uint32_t e1 = tables.litlen[acc_extract(bits_lo, bits_hi,   ebits0)];
-                const uint32_t e2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*ebits0)];
-                const uint32_t e3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*ebits0)];
-                const uint32_t e4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*ebits0)];
-                const uint32_t e5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*ebits0)];
-                const uint32_t e6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*ebits0)];
-                const uint32_t e7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*ebits0)];
-                const uint32_t e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
+                uint32_t e1, e2, e3, e4, e5, e6, e7, e8;
+                if (__builtin_expect(ebits0 == prev_ebits0, 1)) {
+                    e1 = sg1; e2 = sg2; e3 = sg3; e4 = sg4;
+                    e5 = sg5; e6 = sg6; e7 = sg7; e8 = sg8;
+                } else {
+                    prev_ebits0 = ebits0;
+                    e1 = tables.litlen[acc_extract(bits_lo, bits_hi,   ebits0)];
+                    e2 = tables.litlen[acc_extract(bits_lo, bits_hi, 2*ebits0)];
+                    e3 = tables.litlen[acc_extract(bits_lo, bits_hi, 3*ebits0)];
+                    e4 = tables.litlen[acc_extract(bits_lo, bits_hi, 4*ebits0)];
+                    e5 = tables.litlen[acc_extract(bits_lo, bits_hi, 5*ebits0)];
+                    e6 = tables.litlen[acc_extract(bits_lo, bits_hi, 6*ebits0)];
+                    e7 = tables.litlen[acc_extract(bits_lo, bits_hi, 7*ebits0)];
+                    e8 = tables.litlen[acc_extract(bits_lo, bits_hi, 8*ebits0)];
+                }
 
                 if (__builtin_expect(
                         ((e1 & CHECK) == OK) & ((e2 & CHECK) == OK) &
@@ -425,6 +461,7 @@ decode_symbol:;
             if (__builtin_expect(e0 & HUFF_LITERAL_FLAG, 1)) {
                 *out++ = static_cast<uint8_t>(e0);
                 if (__builtin_expect(out > safe_out_end, 0)) goto done;
+                prev_ebits0 = ebits0;
                 if (__builtin_expect(bit_cnt >= MIN_DECODE_BITS, 1))
                     goto decode_symbol;
                 continue;

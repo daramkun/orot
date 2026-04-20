@@ -70,12 +70,14 @@ uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
     uint32_t s2 = (adler >> 16) & 0xFFFF;
 
     /*
-     * 64B/iter dual-accumulator: process bytes [0..15], [16..31], [32..47], [48..63]
-     * with positional weights [64..49], [48..33], [32..17], [16..1].
+     * 64B/iter 5-accumulator design: breaks the 9-step serial vs2 recurrence.
      *
-     * vs2 carry = vs1 * 64 (each of the 64 new bytes contributes the current s1 once).
-     * Two independent register chains (b0/b1 path and b2/b3 path) let the CPU
-     * execute both halves in parallel, breaking the vs1→vs2 iteration dependency.
+     * Old: single vs2 with 9 sequential vaddq_u32 per iter → 18-cycle recurrence.
+     * New: vs2_c (carry) + vs2_h0..h3 (one per 16-byte group) — 5 independent
+     *      recurrence chains, each ≤2 steps → 4-cycle recurrence per chain.
+     *
+     * Critical path: max(vs1 chain 8 cycles, vs2_c chain 8 cycles) = 8 cycles/iter
+     * vs 26 cycles before → ~3× throughput improvement for adler32.
      */
     static const uint8_t w64_hi_arr[16] = {
         64,63,62,61,60,59,58,57,56,55,54,53,52,51,50,49
@@ -102,51 +104,60 @@ uint32_t neon_adler32(uint32_t adler, const uint8_t* data, size_t len) {
         uint32x4_t vs2 = vdupq_n_u32(0);
         const uint8_t* p = data;
 
-        /* 64B main loop: 4× 16-byte loads, weights [64..1] */
-        while (p + 64 <= end) {
-            /* carry: 64 new bytes each add current vs1 once to s2 */
-            vs2 = vaddq_u32(vs2, vshlq_n_u32(vs1, 6));  /* vs2 += vs1 * 64 */
+        /* 64B main loop: 5 independent vs2 accumulators break the serial chain.
+         * vs2_c: carry (vs1*64), vs2_h0..h3: per-group weighted sums.
+         * Each has a 2-step recurrence (4 cycles) vs the old 9-step (18 cycles). */
+        {
+            uint32x4_t vs2_c  = vdupq_n_u32(0);
+            uint32x4_t vs2_h0 = vdupq_n_u32(0);
+            uint32x4_t vs2_h1 = vdupq_n_u32(0);
+            uint32x4_t vs2_h2 = vdupq_n_u32(0);
+            uint32x4_t vs2_h3 = vdupq_n_u32(0);
+            while (p + 64 <= end) {
+                vs2_c = vaddq_u32(vs2_c, vshlq_n_u32(vs1, 6));  /* carry: vs2_c += vs1*64 */
 
-            uint8x16_t b0 = vld1q_u8(p);      /* weights [64..49] */
-            uint8x16_t b1 = vld1q_u8(p + 16); /* weights [48..33] */
-            uint8x16_t b2 = vld1q_u8(p + 32); /* weights [32..17] */
-            uint8x16_t b3 = vld1q_u8(p + 48); /* weights [16..1]  */
+                uint8x16_t b0 = vld1q_u8(p);      /* weights [64..49] */
+                uint8x16_t b1 = vld1q_u8(p + 16); /* weights [48..33] */
+                uint8x16_t b2 = vld1q_u8(p + 32); /* weights [32..17] */
+                uint8x16_t b3 = vld1q_u8(p + 48); /* weights [16..1]  */
 
-            /* s1: sum all 64 bytes */
-            uint16x8_t s16_0 = vaddl_u8(vget_low_u8(b0), vget_high_u8(b0));
-            uint16x8_t s16_1 = vaddl_u8(vget_low_u8(b1), vget_high_u8(b1));
-            uint16x8_t s16_2 = vaddl_u8(vget_low_u8(b2), vget_high_u8(b2));
-            uint16x8_t s16_3 = vaddl_u8(vget_low_u8(b3), vget_high_u8(b3));
-            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_0), vget_high_u16(s16_0)));
-            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_1), vget_high_u16(s16_1)));
-            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_2), vget_high_u16(s16_2)));
-            vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_3), vget_high_u16(s16_3)));
+                /* s1: sum all 64 bytes (4-step serial chain) */
+                uint16x8_t s16_0 = vaddl_u8(vget_low_u8(b0), vget_high_u8(b0));
+                uint16x8_t s16_1 = vaddl_u8(vget_low_u8(b1), vget_high_u8(b1));
+                uint16x8_t s16_2 = vaddl_u8(vget_low_u8(b2), vget_high_u8(b2));
+                uint16x8_t s16_3 = vaddl_u8(vget_low_u8(b3), vget_high_u8(b3));
+                vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_0), vget_high_u16(s16_0)));
+                vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_1), vget_high_u16(s16_1)));
+                vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_2), vget_high_u16(s16_2)));
+                vs1 = vaddq_u32(vs1, vaddl_u16(vget_low_u16(s16_3), vget_high_u16(s16_3)));
 
-            /* s2: b0 weighted [64..49] — independent of b2/b3 chain */
-            uint16x8_t h0l = vmull_u8(vget_low_u8(b0),  vget_low_u8(W64_HI));
-            uint16x8_t h0h = vmull_u8(vget_high_u8(b0), vget_high_u8(W64_HI));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h0l), vget_high_u16(h0l)));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h0h), vget_high_u16(h0h)));
+                /* s2: each group accumulates into its own independent register chain */
+                uint16x8_t h0l = vmull_u8(vget_low_u8(b0),  vget_low_u8(W64_HI));
+                uint16x8_t h0h = vmull_u8(vget_high_u8(b0), vget_high_u8(W64_HI));
+                vs2_h0 = vaddq_u32(vs2_h0, vaddl_u16(vget_low_u16(h0l), vget_high_u16(h0l)));
+                vs2_h0 = vaddq_u32(vs2_h0, vaddl_u16(vget_low_u16(h0h), vget_high_u16(h0h)));
 
-            /* s2: b1 weighted [48..33] */
-            uint16x8_t h1l = vmull_u8(vget_low_u8(b1),  vget_low_u8(W64_LO));
-            uint16x8_t h1h = vmull_u8(vget_high_u8(b1), vget_high_u8(W64_LO));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h1l), vget_high_u16(h1l)));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h1h), vget_high_u16(h1h)));
+                uint16x8_t h1l = vmull_u8(vget_low_u8(b1),  vget_low_u8(W64_LO));
+                uint16x8_t h1h = vmull_u8(vget_high_u8(b1), vget_high_u8(W64_LO));
+                vs2_h1 = vaddq_u32(vs2_h1, vaddl_u16(vget_low_u16(h1l), vget_high_u16(h1l)));
+                vs2_h1 = vaddq_u32(vs2_h1, vaddl_u16(vget_low_u16(h1h), vget_high_u16(h1h)));
 
-            /* s2: b2 weighted [32..17] */
-            uint16x8_t h2l = vmull_u8(vget_low_u8(b2),  vget_low_u8(W32_HI));
-            uint16x8_t h2h = vmull_u8(vget_high_u8(b2), vget_high_u8(W32_HI));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h2l), vget_high_u16(h2l)));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h2h), vget_high_u16(h2h)));
+                uint16x8_t h2l = vmull_u8(vget_low_u8(b2),  vget_low_u8(W32_HI));
+                uint16x8_t h2h = vmull_u8(vget_high_u8(b2), vget_high_u8(W32_HI));
+                vs2_h2 = vaddq_u32(vs2_h2, vaddl_u16(vget_low_u16(h2l), vget_high_u16(h2l)));
+                vs2_h2 = vaddq_u32(vs2_h2, vaddl_u16(vget_low_u16(h2h), vget_high_u16(h2h)));
 
-            /* s2: b3 weighted [16..1] */
-            uint16x8_t h3l = vmull_u8(vget_low_u8(b3),  vget_low_u8(W32_LO));
-            uint16x8_t h3h = vmull_u8(vget_high_u8(b3), vget_high_u8(W32_LO));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h3l), vget_high_u16(h3l)));
-            vs2 = vaddq_u32(vs2, vaddl_u16(vget_low_u16(h3h), vget_high_u16(h3h)));
+                uint16x8_t h3l = vmull_u8(vget_low_u8(b3),  vget_low_u8(W32_LO));
+                uint16x8_t h3h = vmull_u8(vget_high_u8(b3), vget_high_u8(W32_LO));
+                vs2_h3 = vaddq_u32(vs2_h3, vaddl_u16(vget_low_u16(h3l), vget_high_u16(h3l)));
+                vs2_h3 = vaddq_u32(vs2_h3, vaddl_u16(vget_low_u16(h3h), vget_high_u16(h3h)));
 
-            p += 64;
+                p += 64;
+            }
+            /* Combine 5 independent chains into vs2 */
+            vs2 = vaddq_u32(
+                vaddq_u32(vs2_c, vs2_h0),
+                vaddq_u32(vaddq_u32(vs2_h1, vs2_h2), vs2_h3));
         }
 
         /* 32B tail within chunk */

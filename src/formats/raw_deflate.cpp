@@ -22,10 +22,12 @@ size_t raw_compress(
     return c.compress(src, src_len, dst, dst_capacity, is_last);
 }
 
-deflate_result raw_decompress(
+deflate_result raw_decompress_ex(
     const uint8_t* src, size_t src_len,
     uint8_t*       dst, size_t dst_capacity,
-    size_t*        actual_out_size)
+    size_t*        actual_out_size,
+    uint32_t*      out_adler,
+    bool*          out_adler_exact)
 {
     Decompressor d;
     size_t avail_in  = src_len;
@@ -33,24 +35,32 @@ deflate_result raw_decompress(
     deflate_result r = d.decompress(&src, &avail_in, &dst, &avail_out);
     if (r == DEFLATE_STREAM_END) {
         *actual_out_size = dst_capacity - avail_out;
+        if (out_adler)       *out_adler       = d.adler();
+        if (out_adler_exact) *out_adler_exact = d.adler_exact();
         return DEFLATE_OK;
     }
-    /* Output buffer exactly full: retry with a scratch byte to drain EOB from
-     * the bit buffer.  The decompressor returns DEFLATE_NEED_OUTPUT when
-     * avail_out reaches 0 before it processes the end-of-block symbol.  A
-     * single extra call with 1 byte of space lets it finish cleanly. */
     if (r == DEFLATE_NEED_OUTPUT && avail_out == 0 && avail_in == 0) {
         uint8_t scratch = 0;
         uint8_t* sp = &scratch;
         size_t   so = 1;
         r = d.decompress(&src, &avail_in, &sp, &so);
         if (r == DEFLATE_STREAM_END && so == 1) {
-            /* scratch was not written: EOB decoded with zero output */
             *actual_out_size = dst_capacity;
+            if (out_adler)       *out_adler       = d.adler();
+            if (out_adler_exact) *out_adler_exact = d.adler_exact();
             return DEFLATE_OK;
         }
     }
     return (r < 0) ? r : DEFLATE_DATA_ERROR;
+}
+
+deflate_result raw_decompress(
+    const uint8_t* src, size_t src_len,
+    uint8_t*       dst, size_t dst_capacity,
+    size_t*        actual_out_size)
+{
+    return raw_decompress_ex(src, src_len, dst, dst_capacity,
+                             actual_out_size, nullptr, nullptr);
 }
 
 } } /* namespace orot::deflate */

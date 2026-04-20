@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include "../simd/simd_dispatch.hpp"
 
 namespace orot { namespace deflate {
 
@@ -31,6 +32,8 @@ void Decompressor::reset() {
     std::memset(window_.data(), 0, WIN_SIZE);
     out_origin_       = nullptr;
     out_expected_end_ = nullptr;
+    adler_       = 1;
+    adler_exact_ = true;
 }
 
 /*
@@ -283,6 +286,7 @@ loop:
             const size_t copy = std::min<size_t>(
                 static_cast<size_t>(stored_len_ - stored_pos_),
                 std::min(avail_in, avail_out));
+            adler_ = simd_adler32_fn()(adler_, next_in, copy);
             std::memcpy(next_out, next_in, copy);
             /* Contiguous mode: back-references resolved from out_origin_, no
              * need to copy into circular window_.  Streaming mode still syncs. */
@@ -301,6 +305,7 @@ loop:
 
     /* ── Huffman decode ───────────────────────────────────────────────── */
     case State::DECODE_LITLEN: {
+        adler_exact_ = false;  /* Huffman output can't be tracked incrementally */
         /* Fast path: hand off to inflate_fast when:
          *  - enough raw input for safe 8-byte bulk refills
          *  - enough output headroom for the longest possible match (258 bytes)
