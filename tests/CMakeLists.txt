@@ -20,6 +20,10 @@ add_unit_test(test_streaming  unit/test_streaming.cpp)
 add_unit_test(test_simd       unit/test_simd.cpp)
 add_unit_test(test_parallel   unit/test_parallel.cpp)
 
+if(OROT_LZ4)
+  add_unit_test(test_lz4 unit/test_lz4.cpp)
+endif()
+
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
 if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can

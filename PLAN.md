@@ -65,6 +65,7 @@
 | I-3: raw_decompress_ex + zlib_wrapper adler_exact 경로 (STORED-only 스트림 Adler 재계산 제거) | ✅ |
 | J-1: match_find 4-byte 미스 카운트 전환 (첫 바이트→4바이트 단위 consec_misses, 고엔트로피 체인 조기 종료) | ✅ |
 | J-2: 레벨별 miss_limit 차등 적용 (L4-6: 5, L7-9: 6, L10-12: 8) | ✅ |
+| K-1: LZ4 알고리즘 지원 추가 (raw block + LZ4 frame, 레벨 1-9, XXH32 체크섬) | ✅ |
 
 ---
 

@@ -18,6 +18,7 @@ option(OROT_DEFLATE_SHARED       "Build shared library"                         
 option(OROT_DEFLATE_ZLIB_COMPAT  "Build zlib-compatible C aliases"                   ON)
 option(OROT_DEFLATE_COMPARE_BENCH "Build comparison benchmarks (needs zlib+libdeflate)" OFF)
 option(OROT_DEFLATE_COMPAT_TEST  "Cross-library compatibility tests (needs zlib+libdeflate)" OFF)
+option(OROT_LZ4                  "Enable LZ4 compression support"                           ON)
 
 include(cmake/DetectSIMD.cmake)
 include(cmake/CompilerFlags.cmake)
@@ -44,6 +45,14 @@ if(OROT_DEFLATE_THREADS)
         src/parallel/thread_pool.cpp
         src/parallel/parallel_compressor.cpp
         src/decompress/parallel_decompress.cpp
+    )
+endif()
+
+if(OROT_LZ4)
+  list(APPEND OROT_DEFLATE_CORE_SOURCES
+        src/lz4/lz4_block.cpp
+        src/lz4/lz4_frame.cpp
+        src/api/lz4_api.cpp
     )
 endif()
 
@@ -154,6 +163,7 @@ target_compile_definitions(orot PRIVATE
     $<$<BOOL:${DEFLATE_HAS_CRC_ARM}>:DEFLATE_HAS_CRC_ARM>
     $<$<BOOL:${OROT_DEFLATE_THREADS}>:DEFLATE_THREADS_ENABLED>
     $<$<BOOL:${OROT_DEFLATE_ZLIB_COMPAT}>:DEFLATE_ZLIB_COMPAT>
+    $<$<BOOL:${OROT_LZ4}>:OROT_HAS_LZ4>
 )
 
 deflate_set_compiler_flags(orot)
