@@ -19,6 +19,8 @@ option(OROT_DEFLATE_ZLIB_COMPAT  "Build zlib-compatible C aliases"              
 option(OROT_DEFLATE_COMPARE_BENCH "Build comparison benchmarks (needs zlib+libdeflate)" OFF)
 option(OROT_DEFLATE_COMPAT_TEST  "Cross-library compatibility tests (needs zlib+libdeflate)" OFF)
 option(OROT_LZ4                  "Enable LZ4 compression support"                           ON)
+option(OROT_LZ4_BENCH            "Build LZ4 benchmarks"                               OFF)
+option(OROT_LZ4_COMPARE_BENCH    "Build LZ4 comparison benchmarks (needs liblz4)"     OFF)
 
 include(cmake/DetectSIMD.cmake)
 include(cmake/CompilerFlags.cmake)

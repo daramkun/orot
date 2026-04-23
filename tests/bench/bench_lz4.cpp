@@ -1,124 +1,76 @@
 /*
- * bench_lz4.cpp — LZ4 compression/decompression performance benchmark.
+ * bench_lz4.cpp — OROT-only LZ4 benchmark.
  *
- * Measures LZ4 block and frame compression throughput at various levels
- * for different data types (text, zeros, random).
- * 
+ * Mirrors bench_compress.cpp for the LZ4 block/frame APIs:
+ *   - Compression throughput (MB/s)
+ *   - Decompression throughput (MB/s)
+ *   - Compression ratio (%)
+ *
  * Usage: ./bench_lz4 [iterations]
  */
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "orot/lz4.h"
 
 using Clock = std::chrono::steady_clock;
 
-/* ── Helper: measure compression throughput ────────────────────────────── */
+struct BenchResult {
+    double comp_mbs   = 0;
+    double decomp_mbs = 0;
+    double ratio_pct  = 0;
+    bool ok           = false;
+};
 
-static double bench_lz4_block_compress(
-    const uint8_t* data, size_t len,
-    int level, int iterations)
+template<typename BoundFn, typename CompFn, typename DecompFn>
+static BenchResult run_bench(
+    const uint8_t* src, size_t slen,
+    int level,
+    BoundFn bound_fn, CompFn comp_fn, DecompFn decomp_fn,
+    int iters)
 {
-    const int bound = orot_lz4_compress_bound(static_cast<int>(len));
-    std::vector<uint8_t> out(bound);
+    BenchResult r;
 
-    /* Warm up */
-    orot_lz4_compress(data, static_cast<int>(len), out.data(), bound, level);
+    const int bound = bound_fn(static_cast<int>(slen));
+    if (bound <= 0) return r;
 
-    auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i)
-        orot_lz4_compress(data, static_cast<int>(len), out.data(), bound, level);
-    auto t1 = Clock::now();
+    std::vector<uint8_t> comp(static_cast<size_t>(bound));
+    std::vector<uint8_t> decomp(slen + 64);
 
-    const double secs = std::chrono::duration<double>(t1 - t0).count();
-    const double bytes = static_cast<double>(len) * iterations;
-    return bytes / secs / (1024.0 * 1024.0);  /* MB/s */
-}
+    const int clen = comp_fn(src, static_cast<int>(slen), comp.data(), bound, level);
+    if (clen <= 0) return r;
 
-static double bench_lz4_block_decompress(
-    const uint8_t* data, size_t len,
-    int level, int iterations)
-{
-    const int bound = orot_lz4_compress_bound(static_cast<int>(len));
-    std::vector<uint8_t> comp(bound);
-    const int clen = orot_lz4_compress(data, static_cast<int>(len), comp.data(), bound, level);
-    if (clen <= 0) return 0.0;
-
-    std::vector<uint8_t> out(len + 64);
-
-    /* Warm up */
-    orot_lz4_decompress(comp.data(), clen, out.data(), static_cast<int>(out.size()));
-
-    auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i)
-        orot_lz4_decompress(comp.data(), clen, out.data(), static_cast<int>(out.size()));
-    auto t1 = Clock::now();
-
-    const double secs = std::chrono::duration<double>(t1 - t0).count();
-    const double bytes = static_cast<double>(len) * iterations;
-    return bytes / secs / (1024.0 * 1024.0);
-}
-
-static double bench_lz4f_compress(
-    const uint8_t* data, size_t len,
-    int level, int iterations)
-{
-    const int bound = orot_lz4f_compress_bound(static_cast<int>(len));
-    std::vector<uint8_t> out(bound);
-
-    /* Warm up */
-    orot_lz4f_compress(data, static_cast<int>(len), out.data(), bound, level);
-
-    auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i)
-        orot_lz4f_compress(data, static_cast<int>(len), out.data(), bound, level);
-    auto t1 = Clock::now();
-
-    const double secs = std::chrono::duration<double>(t1 - t0).count();
-    const double bytes = static_cast<double>(len) * iterations;
-    return bytes / secs / (1024.0 * 1024.0);
-}
-
-static double bench_lz4f_decompress(
-    const uint8_t* data, size_t len,
-    int level, int iterations)
-{
-    const int bound = orot_lz4f_compress_bound(static_cast<int>(len));
-    std::vector<uint8_t> comp(bound);
-    const int clen = orot_lz4f_compress(data, static_cast<int>(len), comp.data(), bound, level);
-    if (clen <= 0) return 0.0;
-
-    std::vector<uint8_t> out(len + 64);
-
-    /* Warm up */
-    orot_lz4f_decompress(comp.data(), clen, out.data(), static_cast<int>(out.size()));
-
-    auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i)
-        orot_lz4f_decompress(comp.data(), clen, out.data(), static_cast<int>(out.size()));
-    auto t1 = Clock::now();
-
-    const double secs = std::chrono::duration<double>(t1 - t0).count();
-    const double bytes = static_cast<double>(len) * iterations;
-    return bytes / secs / (1024.0 * 1024.0);
-}
-
-/* ── Compression ratio measurement ──────────────────────────────────────── */
-
-static void measure_compression_ratio(
-    const uint8_t* data, size_t len, int level, const char* label)
-{
-    const int bound = orot_lz4_compress_bound(static_cast<int>(len));
-    std::vector<uint8_t> comp(bound);
-    const int clen = orot_lz4_compress(data, static_cast<int>(len), comp.data(), bound, level);
-    
-    if (clen > 0) {
-        const double ratio = (len > 0) ? (100.0 * clen / len) : 0.0;
-        std::printf("  %-40s L%d  in=%8zu  out=%8d  ratio=%6.2f%%\n",
-            label, level, len, clen, ratio);
+    const int dlen = decomp_fn(comp.data(), clen, decomp.data(), static_cast<int>(decomp.size()));
+    if (dlen != static_cast<int>(slen) || std::memcmp(src, decomp.data(), slen) != 0) {
+        std::fprintf(stderr, "  [WARN] round-trip mismatch! clen=%d dlen=%d expected=%zu\n",
+                     clen, dlen, slen);
+        return r;
     }
+
+    r.ratio_pct = 100.0 * static_cast<double>(clen) / static_cast<double>(slen);
+
+    auto t0 = Clock::now();
+    for (int i = 0; i < iters; ++i)
+        comp_fn(src, static_cast<int>(slen), comp.data(), bound, level);
+    auto t1 = Clock::now();
+
+    double secs = std::chrono::duration<double>(t1 - t0).count();
+    r.comp_mbs = static_cast<double>(slen) * iters / secs / (1024.0 * 1024.0);
+
+    t0 = Clock::now();
+    for (int i = 0; i < iters; ++i)
+        decomp_fn(comp.data(), clen, decomp.data(), static_cast<int>(decomp.size()));
+    t1 = Clock::now();
+
+    secs = std::chrono::duration<double>(t1 - t0).count();
+    r.decomp_mbs = static_cast<double>(slen) * iters / secs / (1024.0 * 1024.0);
+    r.ok = true;
+    return r;
 }
 
 int main(int argc, char* argv[]) {
@@ -126,33 +78,15 @@ int main(int argc, char* argv[]) {
     if (argc > 1) iters = std::atoi(argv[1]);
     if (iters < 1) iters = 1;
 
-    std::printf("========================================\n");
-    std::printf("LZ4 Compression Benchmark\n");
-    std::printf("========================================\n\n");
-
-    /* ── Build test datasets ─────────────────────────────────────────────── */
-
-    /* Repetitive text */
     std::string text;
-    const char* text_samples[] = {
-        "The quick brown fox jumps over the lazy dog. ",
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ",
-        "Sphinx of black quartz, judge my vow. ",
-        "Pack my box with five dozen liquor jugs. ",
-        "How vexingly quick daft zebras jump! ",
-        "Jackdaws love my big sphinx of quartz. ",
-        "Two driven jocks help foxy brown jump. ",
-    };
     for (int i = 0; i < 2000; ++i)
-        text += text_samples[i % 7];
+        text += "The quick brown fox jumps over the lazy dog. ";
     const auto* tp = reinterpret_cast<const uint8_t*>(text.data());
     const size_t tl = text.size();
 
-    /* All zeros (highly compressible) */
-    std::vector<uint8_t> zeros(1024 * 1024, 0);
+    std::vector<uint8_t> zeros(1 << 20, 0);
 
-    /* Random data (incompressible) */
-    std::vector<uint8_t> rnd(1024 * 1024);
+    std::vector<uint8_t> rnd(1 << 20);
     {
         uint32_t state = 0xDEADBEEFU;
         for (auto& b : rnd) {
@@ -161,101 +95,64 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    /* JSON-like structured data */
-    std::string json;
-    for (int i = 0; i < 500; ++i) {
-        json += "{\"id\":" + std::to_string(i) + 
-                ",\"name\":\"item_" + std::to_string(i % 100) +
-                "\",\"type\":\"product\",\"status\":\"active\"}\n";
+    std::vector<uint8_t> src_code(512 * 1024);
+    {
+        const char* pat = "int foo(int x) { return x * 2 + 1; }\n";
+        const size_t pl = std::strlen(pat);
+        for (size_t i = 0; i < src_code.size(); ++i)
+            src_code[i] = static_cast<uint8_t>(pat[i % pl]);
     }
-    const auto* jp = reinterpret_cast<const uint8_t*>(json.data());
-    const size_t jl = json.size();
 
-    /* Structured repeating pattern */
-    std::vector<uint8_t> pattern(256 * 1024);
-    for (size_t i = 0; i < pattern.size(); ++i)
-        pattern[i] = static_cast<uint8_t>((i / 4) % 256);
-
-    struct Dataset {
-        const uint8_t* data;
-        size_t len;
-        const char* name;
-    };
-
+    struct Dataset { const uint8_t* p; size_t len; const char* name; };
     Dataset datasets[] = {
-        { tp, tl, "text (~100KB)" },
-        { zeros.data(), zeros.size(), "zeros (1 MB)" },
-        { rnd.data(), rnd.size(), "random (1 MB)" },
-        { pattern.data(), pattern.size(), "pattern (256 KB)" },
-        { jp, jl, "json (~50KB)" },
+        { tp,              tl,              "text (~90KB)"  },
+        { zeros.data(),    zeros.size(),    "zeros (1MB)"   },
+        { rnd.data(),      rnd.size(),      "random (1MB)"  },
+        { src_code.data(), src_code.size(), "code (~512KB)" },
     };
 
-    static const int levels[] = { 1, 3, 6, 9 };
+    static const int levels[] = { 1, 6, 9 };
 
-    /* ── Compression ratio ─────────────────────────────────────────────── */
+    std::printf("%-10s %-16s %-7s  %10s  %11s  %7s\n",
+                "Format", "Dataset", "Level",
+                "Comp MB/s", "Decomp MB/s", "Ratio%");
+    std::printf("%s\n", std::string(71, '-').c_str());
 
-    std::printf("Compression Ratio (LZ4 block):\n");
-    std::printf("%s\n", std::string(80, '-').c_str());
-    for (const auto& ds : datasets) {
-        for (int lvl : levels) {
-            measure_compression_ratio(ds.data, ds.len, lvl, ds.name);
+    auto print_row = [](const char* format, const char* dataset, int level, const BenchResult& r) {
+        if (!r.ok) {
+            std::printf("%-10s %-16s L%-6d  %10s  %11s  %7s\n",
+                        format, dataset, level, "FAIL", "-", "-");
+            return;
         }
-        std::printf("\n");
-    }
-
-    /* ── LZ4 Block performance ──────────────────────────────────────────── */
-
-    std::printf("\nLZ4 Block Format Performance:\n");
-    std::printf("%s\n", std::string(90, '-').c_str());
-    std::printf("%-30s  %4s  %15s  %15s  %10s\n",
-        "dataset", "lvl", "compress MB/s", "decompress MB/s", "ratio");
-    std::printf("%s\n", std::string(90, '-').c_str());
+        std::printf("%-10s %-16s L%-6d  %10.1f  %11.1f  %6.1f%%\n",
+                    format, dataset, level, r.comp_mbs, r.decomp_mbs, r.ratio_pct);
+    };
 
     for (const auto& ds : datasets) {
-        for (int lvl : levels) {
-            const int bound = orot_lz4_compress_bound(static_cast<int>(ds.len));
-            std::vector<uint8_t> comp(bound);
-            const int clen = orot_lz4_compress(
-                ds.data, static_cast<int>(ds.len), comp.data(), bound, lvl);
+        for (int level : levels) {
+            print_row("block", ds.name, level, run_bench(
+                ds.p, ds.len, level,
+                [](int len) { return orot_lz4_compress_bound(len); },
+                [](const uint8_t* src, int slen, uint8_t* dst, int dcap, int lvl) {
+                    return orot_lz4_compress(src, slen, dst, dcap, lvl);
+                },
+                [](const uint8_t* src, int slen, uint8_t* dst, int dcap) {
+                    return orot_lz4_decompress(src, slen, dst, dcap);
+                },
+                iters));
 
-            const double ratio = (ds.len > 0) ? (100.0 * clen / ds.len) : 0.0;
-            const double comp_mbs = bench_lz4_block_compress(ds.data, ds.len, lvl, iters);
-            const double decomp_mbs = bench_lz4_block_decompress(ds.data, ds.len, lvl, iters);
-
-            std::printf("%-30s  %4d  %15.1f  %15.1f  %9.2f%%\n",
-                ds.name, lvl, comp_mbs, decomp_mbs, ratio);
+            print_row("frame", ds.name, level, run_bench(
+                ds.p, ds.len, level,
+                [](int len) { return orot_lz4f_compress_bound(len); },
+                [](const uint8_t* src, int slen, uint8_t* dst, int dcap, int lvl) {
+                    return orot_lz4f_compress(src, slen, dst, dcap, lvl);
+                },
+                [](const uint8_t* src, int slen, uint8_t* dst, int dcap) {
+                    return orot_lz4f_decompress(src, slen, dst, dcap);
+                },
+                iters));
         }
-        std::printf("\n");
     }
-
-    /* ── LZ4 Frame performance ──────────────────────────────────────────– */
-
-    std::printf("\nLZ4 Frame Format Performance:\n");
-    std::printf("%s\n", std::string(90, '-').c_str());
-    std::printf("%-30s  %4s  %15s  %15s  %10s\n",
-        "dataset", "lvl", "compress MB/s", "decompress MB/s", "ratio");
-    std::printf("%s\n", std::string(90, '-').c_str());
-
-    for (const auto& ds : datasets) {
-        for (int lvl : levels) {
-            const int bound = orot_lz4f_compress_bound(static_cast<int>(ds.len));
-            std::vector<uint8_t> comp(bound);
-            const int clen = orot_lz4f_compress(
-                ds.data, static_cast<int>(ds.len), comp.data(), bound, lvl);
-
-            const double ratio = (ds.len > 0) ? (100.0 * clen / ds.len) : 0.0;
-            const double comp_mbs = bench_lz4f_compress(ds.data, ds.len, lvl, iters);
-            const double decomp_mbs = bench_lz4f_decompress(ds.data, ds.len, lvl, iters);
-
-            std::printf("%-30s  %4d  %15.1f  %15.1f  %9.2f%%\n",
-                ds.name, lvl, comp_mbs, decomp_mbs, ratio);
-        }
-        std::printf("\n");
-    }
-
-    std::printf("========================================\n");
-    std::printf("Benchmark complete (iterations: %d)\n", iters);
-    std::printf("========================================\n");
 
     return 0;
 }

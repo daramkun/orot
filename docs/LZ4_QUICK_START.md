@@ -7,7 +7,7 @@ LZ4 구현의 정합성(correctness)과 성능(performance)을 빠르게 검증�
 ```bash
 cd orot
 mkdir -p build && cd build
-cmake -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . --target test_lz4_comprehensive bench_lz4
 ./tests/test_lz4_comprehensive
 ```
@@ -69,7 +69,7 @@ Throughput (compression at L6):
 
 ---
 
-### 3. 성능 벤치마크 (bench_lz4)
+### 3. 성능 벤치마크 (bench_lz4, bench_lz4_compare)
 **목적:** 압축/해제 처리량과 압축률 측정
 
 ```bash
@@ -83,23 +83,28 @@ Throughput (compression at L6):
 ./tests/bench_lz4 500
 ```
 
+`liblz4`와 직접 비교하려면:
+
+```bash
+cmake -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --build . --target bench_lz4_compare
+./tests/bench_lz4_compare 100
+```
+
 **출력 분석:**
 
-#### 압축률 (Compression Ratio)
+#### 단일 라이브러리 출력 형식
 ```
-text (~100KB)        L1  ratio= 0.72%    ← 우수한 압축
-zeros (1 MB)         L1  ratio= 0.39%    ← 매우 우수
-random (1 MB)        L1  ratio=100.39%   ← 압축 불가능
-json (~50KB)         L6  ratio= 9.86%    ← 레벨에 따라 개선
+Format     Dataset           Level      Comp MB/s   Decomp MB/s   Ratio%
+block      text (~90KB)      L1            2456.3        3145.2    51.6%
+frame      text (~90KB)      L1            2401.5        3102.1    51.9%
 ```
 
-#### 처리량 (Throughput - MB/s)
+#### 비교 벤치 출력 형식
 ```
-데이터타입   압축 L1    해제 L1    압축 L9    해제 L9
-text        10000+     35000+     1000+     40000+
-zeros       30000+     24000+      900+     40000+
-random         90        31000       25      32000+
-json         1100+       2880       50        3200+
+Library    Format   Dataset           Level      Comp MB/s   Decomp MB/s   Ratio%    CPU ms  RSS dKB
+orot       block    text (~90KB)      L1            2400.0        3100.0    51.6%     0.040        0
+liblz4     block    text (~90KB)      L1            2550.0        3200.0    50.9%     0.038        0
 ```
 
 **성능 해석:**

@@ -2,11 +2,12 @@
 
 ## Overview
 
-The OROT project includes comprehensive testing and performance benchmarking for the LZ4 compression implementation. Three main test suites are provided:
+The OROT project includes comprehensive testing and performance benchmarking for the LZ4 compression implementation. Four main targets are provided:
 
 1. **test_lz4**: Original unit tests for block and frame formats
 2. **test_lz4_comprehensive**: Extended validation tests covering correctness, compression ratios, and edge cases
-3. **bench_lz4**: Performance benchmarking tool measuring throughput and compression ratios
+3. **bench_lz4**: OROT-only benchmark for block/frame throughput and compression ratio
+4. **bench_lz4_compare**: Cross-library benchmark comparing OROT with `liblz4`
 
 ---
 
@@ -20,7 +21,7 @@ First, ensure LZ4 is enabled in your CMake build:
 cd orot
 mkdir -p build
 cd build
-cmake .. -DOROT_LZ4=ON
+cmake .. -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON
 ```
 
 ### Build Unit Tests
@@ -35,11 +36,18 @@ Or build all tests:
 cmake --build .
 ```
 
-### Build Performance Benchmark
+### Build Performance Benchmarks
 
 ```bash
-cmake .. -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
+cmake .. -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
 cmake --build . --target bench_lz4
+```
+
+Build the comparison benchmark against `liblz4`:
+
+```bash
+cmake .. -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON
+cmake --build . --target bench_lz4_compare
 ```
 
 ---
@@ -111,33 +119,38 @@ Example:
 
 ### Output Format
 
-The benchmark produces comprehensive metrics:
+The benchmark produces a compact table similar to the DEFLATE benchmarks:
 
 ```
-========================================
-LZ4 Compression Benchmark
-========================================
-
-Compression Ratio (LZ4 block):
-────────────────────────────────────────────────────────────────────────────
-  text                                 L1  in=    90816  out=    46912  ratio=51.64%
-  text                                 L3  in=    90816  out=    44096  ratio=48.55%
-  ...
-
-LZ4 Block Format Performance:
-──────────────────────────────────────────────────────────────────────────────
-dataset                          lvl  compress MB/s   decompress MB/s  ratio
-──────────────────────────────────────────────────────────────────────────────
-text                             1       2456.3          3145.2      51.64%
-text                             3       1892.1          3198.7      48.55%
+Format     Dataset           Level      Comp MB/s   Decomp MB/s   Ratio%
+-----------------------------------------------------------------------
+block      text (~90KB)      L1            2456.3        3145.2    51.6%
+frame      text (~90KB)      L1            2401.5        3102.1    51.9%
+block      zeros (1MB)       L6           30000.0       24000.0     0.4%
 ...
+```
 
-LZ4 Frame Format Performance:
-──────────────────────────────────────────────────────────────────────────────
-dataset                          lvl  compress MB/s   decompress MB/s  ratio
-──────────────────────────────────────────────────────────────────────────────
-text                             1       2401.5          3102.1      51.92%
-...
+### Running Comparison Benchmark
+
+```bash
+./build/tests/bench_lz4_compare [iterations]
+```
+
+Example:
+
+```bash
+./build/tests/bench_lz4_compare 100
+```
+
+The comparison benchmark mirrors `bench_compare` from DEFLATE and adds a `Format` column:
+
+```
+Library    Format   Dataset           Level      Comp MB/s   Decomp MB/s   Ratio%    CPU ms  RSS dKB
+------------------------------------------------------------------------------------------------------
+orot       block    text (~90KB)      L1            2400.0        3100.0    51.6%     0.040        0
+liblz4     block    text (~90KB)      L1            2550.0        3200.0    50.9%     0.038        0
+orot       frame    text (~90KB)      L1            2350.0        3050.0    51.9%     0.041        0
+liblz4     frame    text (~90KB)      L1            2480.0        3180.0    51.2%     0.039        0
 ```
 
 ---
@@ -221,6 +234,7 @@ After building and running tests, verify:
 - [ ] `test_lz4` runs without crashes and reports all tests PASS
 - [ ] `test_lz4_comprehensive` completes with 0 failures
 - [ ] `bench_lz4` shows consistent throughput across runs
+- [ ] `bench_lz4_compare` completes successfully when `liblz4` is installed
 - [ ] Compression ratios for zeros data are < 1%
 - [ ] Compression ratios for text data are 40-70%
 - [ ] Decompression is consistently faster than compression

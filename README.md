@@ -61,8 +61,9 @@ cmake --install build --prefix /usr/local
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
 | `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
-| `OROT_LZ4` | OFF | LZ4 압축 지원 (block + frame) |
-| `OROT_LZ4_BENCH` | OFF | LZ4 성능 벤치마크 |
+| `OROT_LZ4` | ON | LZ4 압축 지원 (block + frame) |
+| `OROT_LZ4_BENCH` | OFF | LZ4 단일 라이브러리 벤치마크 |
+| `OROT_LZ4_COMPARE_BENCH` | OFF | liblz4 비교 벤치마크 |
 
 ## 테스트
 
@@ -120,7 +121,9 @@ ctest --test-dir build -R compat
 
 #### 빌드
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_LZ4=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_LZ4=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -177,7 +180,9 @@ Random (L1):  1100+ MB/s 압축, 1000+ MB/s 해제
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
+      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_LZ4=ON \
+      -DOROT_LZ4_BENCH=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_lz4 [iterations]
 ```
@@ -191,15 +196,15 @@ Random (L1):    90 MB/s 압축, 31K+ MB/s 해제
 
 자세한 해석: [LZ4 성능 가이드](docs/LZ4_QUICK_START.md#성능-기준표)
 
-### 비교 벤치마크 (zlib, libdeflate와 비교)
+### LZ4 비교 벤치마크 (liblz4와 비교)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_DEFLATE_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON \
-      -DOROT_DEFLATE_COMPARE_BENCH=ON
+      -DOROT_LZ4=ON \
+      -DOROT_LZ4_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)
-./build/tests/bench/bench_compare
+./build/tests/bench_lz4_compare [iterations]
 ```
 
 ## CMake 프로젝트에서 사용
