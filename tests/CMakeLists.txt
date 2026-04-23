@@ -22,6 +22,7 @@ add_unit_test(test_parallel   unit/test_parallel.cpp)
 
 if(OROT_LZ4)
   add_unit_test(test_lz4 unit/test_lz4.cpp)
+  add_unit_test(test_lz4_comprehensive unit/test_lz4_comprehensive.cpp)
 endif()
 
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
@@ -81,6 +82,17 @@ if(OROT_DEFLATE_BENCH)
         ${CMAKE_SOURCE_DIR}/include
     )
   target_compile_options(bench_compress PRIVATE -O3)
+endif()
+
+# ── LZ4 Benchmark (opt-in: -DOROT_LZ4_BENCH=ON) ────────────────────────────────────
+if(OROT_LZ4_BENCH)
+  add_executable(bench_lz4 bench/bench_lz4.cpp)
+  target_link_libraries(bench_lz4 PRIVATE orot)
+  target_include_directories(bench_lz4 PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+  target_compile_options(bench_lz4 PRIVATE -O3)
+  message(STATUS "LZ4: performance benchmark enabled")
 endif()
 
 # ── Comparison benchmark (opt-in: -DOROT_DEFLATE_COMPARE_BENCH=ON, needs zlib+libdeflate) ──

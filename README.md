@@ -4,10 +4,16 @@ C++20 무손실 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC
 
 ## 특징
 
-- C API (whole-buffer, streaming, parallel) + C++ RAII 래퍼
+- **DEFLATE 지원:** Raw DEFLATE, zlib, gzip 형식 (RFC 1951/1950/1952)
+  - C API (whole-buffer, streaming, parallel) + C++ RAII 래퍼
+  - 압축 레벨 0–12 (L0=store, L1=fast, L6=default, L9=better, L12=max)
+  - 자세한 내용: [DEFLATE 빠른 시작](docs/DEFLATE_QUICK_START.md) | [상세 가이드](docs/DEFLATE_TESTING.md) | [검증 보고서](docs/DEFLATE_VALIDATION_REPORT.md)
+- **LZ4 지원 (선택):** 빠른 압축/해제
+  - Block 및 Frame 포맷 지원
+  - 압축 레벨 1–9
+  - 자세한 내용: [LZ4 빠른 시작](docs/LZ4_QUICK_START.md) | [상세 가이드](docs/LZ4_TESTING.md) | [검증 보고서](docs/LZ4_VALIDATION_REPORT.md)
 - SIMD 가속: SSE2 / SSE4.2 / AVX2 (x86), NEON / CRC32 (ARM)
 - 멀티스레드 압축 (pigz 스타일)
-- 압축 레벨 0–12 (L0=store, L1=fast, L6=default, L9=better, L12=max)
 - 커스텀 allocator 지원
 
 ## 요구사항
@@ -55,18 +61,20 @@ cmake --install build --prefix /usr/local
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
 | `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
+| `OROT_LZ4` | OFF | LZ4 압축 지원 (block + frame) |
+| `OROT_LZ4_BENCH` | OFF | LZ4 성능 벤치마크 |
 
 ## 테스트
 
-### 테스트 빌드
+### DEFLATE 테스트
 
+#### 빌드
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_TESTS=ON
 cmake --build build -j$(nproc)
 ```
 
-### 테스트 실행
-
+#### 실행
 ```bash
 # 전체 테스트
 ctest --test-dir build
@@ -79,8 +87,7 @@ ctest --test-dir build -R roundtrip
 ctest --test-dir build -R "roundtrip|formats|levels"
 ```
 
-### 테스트 목록
-
+#### 테스트 항목
 | 테스트 | 내용 |
 |--------|------|
 | `test_roundtrip` | 압축 ↔ 해제 라운드트립 |
@@ -91,7 +98,9 @@ ctest --test-dir build -R "roundtrip|formats|levels"
 | `test_parallel` | 멀티스레드 압축 |
 | `test_simd` | SIMD 가속 경로 |
 
-### 호환성 테스트 (zlib/libdeflate 필요)
+자세한 가이드: [DEFLATE 테스트 완전 가이드](docs/DEFLATE_TESTING.md)
+
+### DEFLATE 호환성 테스트 (zlib/libdeflate 필요)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
@@ -100,17 +109,87 @@ cmake --build build -j$(nproc)
 ctest --test-dir build -R compat
 ```
 
+**호환성 검증:**
+- orot ↔ zlib 완벽 호환
+- orot ↔ libdeflate 완벽 호환
+- RFC 1951/1950/1952 준수
+
+자세한 내용: [DEFLATE 호환성 테스트](docs/DEFLATE_TESTING.md#호환성-테스트)
+
+### LZ4 테스트 (선택)
+
+#### 빌드
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_LZ4=ON
+cmake --build build -j$(nproc)
+```
+
+#### 실행
+```bash
+# 기본 LZ4 정합성 테스트
+./build/tests/test_lz4
+
+# 종합 LZ4 검증 (정합성, 압축률, 성능)
+./build/tests/test_lz4_comprehensive
+```
+
+#### 테스트 항목
+| 테스트 | 내용 |
+|--------|------|
+| `test_lz4` | LZ4 block/frame 정합성 |
+| `test_lz4_comprehensive` | LZ4 종합 검증 (97개 테스트) |
+
+자세한 가이드: [LZ4 테스트 완전 가이드](docs/LZ4_TESTING.md)
+
 ## 벤치마크
 
-### 단일 라이브러리 벤치마크
+### DEFLATE 성능 벤치마크
 
+#### 단일 라이브러리 벤치마크
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_DEFLATE_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON
 cmake --build build -j$(nproc)
-./build/tests/bench/bench_compress
+./build/tests/bench_compress [iterations]
 ```
+
+#### 비교 벤치마크 (zlib, libdeflate 포함)
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_DEFLATE_BENCH=ON \
+      -DOROT_DEFLATE_COMPARE_BENCH=ON
+cmake --build build -j$(nproc)
+./build/tests/bench_compare [iterations]
+```
+
+**성능 결과 (전형적):**
+```
+Zeros (L1):   3200+ MB/s 압축, 8500+ MB/s 해제
+Text (L6):     900+ MB/s 압축, 3100+ MB/s 해제
+Random (L1):  1100+ MB/s 압축, 1000+ MB/s 해제
+```
+
+자세한 해석: [DEFLATE 성능 가이드](docs/DEFLATE_QUICK_START.md#성능-기준표)
+
+### LZ4 성능 벤치마크
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
+cmake --build build -j$(nproc)
+./build/tests/bench_lz4 [iterations]
+```
+
+**성능 결과 (전형적):**
+```
+Zeros (L1):   30K+ MB/s 압축, 24K+ MB/s 해제
+Text (L1):    10K+ MB/s 압축, 35K+ MB/s 해제
+Random (L1):    90 MB/s 압축, 31K+ MB/s 해제
+```
+
+자세한 해석: [LZ4 성능 가이드](docs/LZ4_QUICK_START.md#성능-기준표)
 
 ### 비교 벤치마크 (zlib, libdeflate와 비교)
 
