@@ -7,7 +7,7 @@ LZ4 구현의 정합성(correctness)과 성능(performance)을 빠르게 검증�
 ```bash
 cd orot
 mkdir -p build && cd build
-cmake -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . --target test_lz4_comprehensive bench_lz4
 ./tests/test_lz4_comprehensive
 ```
@@ -86,7 +86,7 @@ Throughput (compression at L6):
 `liblz4`와 직접 비교하려면:
 
 ```bash
-cmake -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . --target bench_lz4_compare
 ./tests/bench_lz4_compare 100
 ```

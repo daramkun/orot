@@ -42,7 +42,7 @@ cmake --build . -j$(nproc)
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_DEFLATE_SIMD=ON \
       -DOROT_DEFLATE_THREADS=ON \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON \
       -DOROT_DEFLATE_COMPARE_BENCH=ON \
       -DOROT_DEFLATE_COMPAT_TEST=ON
@@ -55,7 +55,7 @@ cmake --build build -j$(nproc)
 cmake -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_CXX_FLAGS="-O3 -march=native -flto" \
-      -DOROT_DEFLATE_TESTS=ON
+      -DOROT_TESTS=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -65,7 +65,7 @@ cmake --build build -j$(nproc)
 cmake -B build \
       -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_CXX_FLAGS="-g -O0 -fsanitize=address" \
-      -DOROT_DEFLATE_TESTS=ON
+      -DOROT_TESTS=ON
 cmake --build build
 ```
 
@@ -263,7 +263,7 @@ cmake --build build -v 2>&1 | grep -i "simd\|sse\|avx\|neon"
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j$(nproc)
 ```
@@ -353,7 +353,7 @@ sudo apt-get install zlib1g-dev libdeflate-dev  # Ubuntu
 
 # 빌드
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON \
       -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)
@@ -641,7 +641,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
-            -DOROT_DEFLATE_TESTS=ON \
+            -DOROT_TESTS=ON \
             -DOROT_DEFLATE_BENCH=ON \
             -DOROT_DEFLATE_COMPARE_BENCH=ON
           cmake --build build -j4
@@ -664,7 +664,7 @@ test:deflate:
         cmake g++ clang zlib1g-dev libdeflate-dev
   script:
     - cmake -B build -DCMAKE_BUILD_TYPE=Release
-        -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_BENCH=ON
+        -DOROT_TESTS=ON -DOROT_DEFLATE_BENCH=ON
     - cmake --build build -j4
     - ctest --test-dir build --output-on-failure
 ```
@@ -680,7 +680,7 @@ pipeline {
       steps {
         sh '''
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_BENCH=ON
+            -DOROT_TESTS=ON -DOROT_DEFLATE_BENCH=ON
           cmake --build build -j4
         '''
       }

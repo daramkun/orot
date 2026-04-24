@@ -21,7 +21,7 @@ First, ensure LZ4 is enabled in your CMake build:
 cd orot
 mkdir -p build
 cd build
-cmake .. -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON
+cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON
 ```
 
 ### Build Unit Tests
@@ -39,14 +39,14 @@ cmake --build .
 ### Build Performance Benchmarks
 
 ```bash
-cmake .. -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
+cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
 cmake --build . --target bench_lz4
 ```
 
 Build the comparison benchmark against `liblz4`:
 
 ```bash
-cmake .. -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON
+cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON
 cmake --build . --target bench_lz4_compare
 ```
 

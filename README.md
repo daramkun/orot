@@ -54,7 +54,7 @@ cmake --install build --prefix /usr/local
 |------|--------|------|
 | `OROT_DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 가속 |
 | `OROT_DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
-| `OROT_DEFLATE_TESTS` | OFF | 유닛 테스트 빌드 |
+| `OROT_TESTS` | OFF | 유닛 테스트 빌드 |
 | `OROT_DEFLATE_BENCH` | OFF | 단일 라이브러리 벤치마크 |
 | `OROT_DEFLATE_COMPARE_BENCH` | OFF | zlib/libdeflate 비교 벤치마크 |
 | `OROT_DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
@@ -71,7 +71,7 @@ cmake --install build --prefix /usr/local
 
 #### 빌드
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_TESTS=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_TESTS=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -105,7 +105,7 @@ ctest --test-dir build -R "roundtrip|formats|levels"
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
+      -DOROT_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j$(nproc)
 ctest --test-dir build -R compat
 ```
@@ -122,7 +122,7 @@ ctest --test-dir build -R compat
 #### 빌드
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_LZ4=ON
 cmake --build build -j$(nproc)
 ```
@@ -151,7 +151,7 @@ cmake --build build -j$(nproc)
 #### 단일 라이브러리 벤치마크
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_compress [iterations]
@@ -160,7 +160,7 @@ cmake --build build -j$(nproc)
 #### 비교 벤치마크 (zlib, libdeflate 포함)
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON \
       -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)
@@ -180,7 +180,7 @@ Random (L1):  1100+ MB/s 압축, 1000+ MB/s 해제
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_LZ4=ON \
       -DOROT_LZ4_BENCH=ON
 cmake --build build -j$(nproc)
@@ -200,7 +200,7 @@ Random (L1):    90 MB/s 압축, 31K+ MB/s 해제
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_LZ4=ON \
       -DOROT_LZ4_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)

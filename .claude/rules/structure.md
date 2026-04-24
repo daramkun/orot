@@ -90,7 +90,7 @@ orot/
 |------|--------|------|
 | `OROT_DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 최적화 |
 | `OROT_DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
-| `OROT_DEFLATE_TESTS` | OFF | 유닛 + 퍼즈 테스트 |
+| `OROT_TESTS` | OFF | 유닛 + 퍼즈 테스트 |
 | `OROT_DEFLATE_BENCH` | OFF | DEFLATE 성능 벤치마크 (→ `bench_deflate`) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | zlib 호환 매크로 별칭 (Z_OK 등) |
 | `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |

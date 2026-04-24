@@ -7,7 +7,7 @@ DEFLATE, zlib, gzip 형식의 압축/해제를 빠르게 검증하고 성능을 
 ```bash
 cd orot
 mkdir -p build && cd build
-cmake -DOROT_DEFLATE_TESTS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DOROT_TESTS=ON -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . -j$(nproc)
 ctest --output-on-failure
 ```
@@ -34,7 +34,7 @@ cmake --build build -j$(nproc)
 ### 테스트 활성화
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_TESTS=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_TESTS=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -42,7 +42,7 @@ cmake --build build -j$(nproc)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON
 cmake --build build -j$(nproc)
 ```
@@ -55,7 +55,7 @@ cmake --build build -j$(nproc)
 # Ubuntu: sudo apt-get install zlib1g-dev libdeflate-dev
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON \
       -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j$(nproc)
@@ -65,7 +65,7 @@ cmake --build build -j$(nproc)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j$(nproc)
 ```
@@ -437,7 +437,7 @@ set -e
 
 echo "Building..."
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_TESTS=ON \
+      -DOROT_TESTS=ON \
       -DOROT_DEFLATE_BENCH=ON
 cmake --build build -j$(nproc)
 
@@ -456,7 +456,7 @@ echo "✓ All validations passed!"
 - name: Build DEFLATE
   run: |
     cmake -B build -DCMAKE_BUILD_TYPE=Release \
-          -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_BENCH=ON
+          -DOROT_TESTS=ON -DOROT_DEFLATE_BENCH=ON
     cmake --build build -j4
 
 - name: Run tests

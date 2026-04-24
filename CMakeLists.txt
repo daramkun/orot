@@ -11,7 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Options
 option(OROT_DEFLATE_SIMD         "Enable SIMD acceleration"                         ON)
 option(OROT_DEFLATE_THREADS      "Enable parallel compression"                       ON)
-option(OROT_DEFLATE_TESTS        "Build unit tests"                                  OFF)
+option(OROT_TESTS        "Build unit tests"                                  OFF)
 option(OROT_DEFLATE_BENCH        "Build benchmarks"                                  OFF)
 option(OROT_DEFLATE_FUZZ         "Build fuzz targets"                                OFF)
 option(OROT_DEFLATE_SHARED       "Build shared library"                              OFF)
@@ -178,7 +178,7 @@ if(OROT_DEFLATE_THREADS)
 endif()
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
-if(OROT_DEFLATE_TESTS)
+if(OROT_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()

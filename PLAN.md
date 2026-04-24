@@ -306,12 +306,12 @@ Phase 상태머신 (HEADER→DATA→TRAILER→DONE) 구현:
 ctest --test-dir build --output-on-failure
 
 # 비교 벤치마크
-cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
+cmake -B build -DOROT_TESTS=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j
 ./build/tests/bench_deflate_compare
 
 # 호환성 테스트
-cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
+cmake -B build -DOROT_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j
 ./build/tests/test_compat
 ```
