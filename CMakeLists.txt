@@ -17,7 +17,6 @@ option(OROT_BENCHMARK_COMPARE    "Build comparison benchmarks (needs zlib+libdef
 option(OROT_DEFLATE_FUZZ         "Build fuzz targets"                                OFF)
 option(OROT_SHARED               "Build shared library"                              OFF)
 option(OROT_DEFLATE_ZLIB_COMPAT  "Build zlib-compatible C aliases"                   ON)
-option(OROT_LZ4                  "Enable LZ4 compression support"                    ON)
 
 include(cmake/DetectSIMD.cmake)
 include(cmake/CompilerFlags.cmake)
@@ -139,11 +138,11 @@ endif()
 # ── Main library target ───────────────────────────────────────────────────────
 if(OROT_SHARED)
   add_library(orot SHARED ${OROT_DEFLATE_CORE_SOURCES}
-        $<$<BOOL:${OROT_LZ4}>:${OROT_LZ4_SOURCES}>
+        ${OROT_LZ4_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 else()
   add_library(orot STATIC ${OROT_DEFLATE_CORE_SOURCES}
-        $<$<BOOL:${OROT_LZ4}>:${OROT_LZ4_SOURCES}>
+        ${OROT_LZ4_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 endif()
 
@@ -164,7 +163,7 @@ target_compile_definitions(orot PRIVATE
     $<$<BOOL:${DEFLATE_HAS_CRC_ARM}>:DEFLATE_HAS_CRC_ARM>
     $<$<BOOL:${OROT_AS_PARALLEL}>:DEFLATE_THREADS_ENABLED>
     $<$<BOOL:${OROT_DEFLATE_ZLIB_COMPAT}>:DEFLATE_ZLIB_COMPAT>
-    $<$<BOOL:${OROT_LZ4}>:OROT_HAS_LZ4>
+    OROT_HAS_LZ4
 )
 
 deflate_set_compiler_flags(orot)

@@ -27,7 +27,7 @@ orot/
 │   │   ├── raw_deflate.{cpp,hpp}   # RFC 1951: raw DEFLATE
 │   │   ├── zlib_wrapper.{cpp,hpp}  # RFC 1950: zlib 프레이밍 (Adler-32)
 │   │   └── gzip_wrapper.{cpp,hpp}  # RFC 1952: gzip 프레이밍 (CRC-32, 헤더)
-│   ├── lz4/                # LZ4 구현 (OROT_LZ4=ON 시 빌드)
+│   ├── lz4/                # LZ4 구현 
 │   │   ├── lz4_block.cpp   # LZ4 raw block 압축/해제
 │   │   └── lz4_frame.cpp   # LZ4 frame 포맷 (XXH32 체크섬)
 │   ├── api/                # C API 진입점
@@ -96,7 +96,6 @@ orot/
 | `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_BENCHMARK_COMPARE` | OFF | DEFLATE 비교 벤치마크 (→ `bench_deflate_compare`, zlib+libdeflate 필요) |
 | `OROT_TESTS` | OFF | 교차 라이브러리 호환성 테스트 |
-| `OROT_LZ4` | ON | LZ4 압축 지원 활성화 |
 | `OROT_BENCHMARK` | OFF | LZ4 성능 벤치마크 (→ `bench_lz4`) |
 | `OROT_BENCHMARK_COMPARE` | OFF | LZ4 비교 벤치마크 (→ `bench_lz4_compare`, liblz4 필요) |
 

@@ -8,7 +8,7 @@
  *   - CPU time (ms per iteration)
  *   - RSS memory delta (KB)
  *
- * Build: cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_LZ4=ON -DOROT_BENCHMARK_COMPARE=ON
+ * Build: cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_BENCHMARK_COMPARE=ON
  * Run:   ./build/tests/bench_lz4_compare [iterations]
  */
 
