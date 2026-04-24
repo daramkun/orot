@@ -1,122 +1,130 @@
 /*
- * bench_compress.cpp — Compression throughput benchmark.
+ * bench_deflate.cpp — OROT-only Deflate benchmark.
  *
- * Measures compression MB/s at various levels for different data types.
- * No external dependency; uses std::chrono.
+ *   - Compression throughput (MB/s)
+ *   - Decompression throughput (MB/s)
+ *   - Compression ratio (%)
  *
- * Usage: ./bench_compress [iterations]
+ * Usage: ./bench_deflate [iterations]
  */
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <string>
 #include <vector>
 
 #include "orot/deflate.h"
 
 using Clock = std::chrono::steady_clock;
 
-static double bench_compress_once(
-    const uint8_t* data, size_t len,
-    int level, deflate_format fmt,
-    int iterations)
+struct BenchResult {
+    double comp_mbs   = 0;
+    double decomp_mbs = 0;
+    double ratio_pct  = 0;
+    bool   ok         = false;
+};
+
+static BenchResult run(
+    const uint8_t* src, size_t slen,
+    int level, deflate_format fmt, int iters)
 {
-    const size_t bound = deflate_compress_bound(len, fmt);
-    std::vector<uint8_t> out(bound);
+    BenchResult r;
 
-    /* Warm up */
-    deflate_compress(data, len, out.data(), bound, level, fmt);
-
-    auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i)
-        deflate_compress(data, len, out.data(), bound, level, fmt);
-    auto t1 = Clock::now();
-
-    const double secs = std::chrono::duration<double>(t1 - t0).count();
-    const double bytes = static_cast<double>(len) * iterations;
-    return bytes / secs / (1024.0 * 1024.0);  /* MB/s */
-}
-
-static double bench_decompress_once(
-    const uint8_t* data, size_t len,
-    int level, deflate_format fmt,
-    int iterations)
-{
-    const size_t bound = deflate_compress_bound(len, fmt);
+    const size_t bound = deflate_compress_bound(slen, fmt);
     std::vector<uint8_t> comp(bound);
-    const size_t clen = deflate_compress(data, len, comp.data(), bound, level, fmt);
-    if (clen == 0) return 0.0;
+    std::vector<uint8_t> decomp(slen + 64);
 
-    std::vector<uint8_t> out(len + 64);
+    const size_t clen = deflate_compress(src, slen, comp.data(), bound, level, fmt);
+    if (clen == 0) return r;
 
-    /* Warm up */
     size_t actual = 0;
-    deflate_decompress(comp.data(), clen, out.data(), out.size(), &actual, fmt);
+    deflate_result dr = deflate_decompress(comp.data(), clen, decomp.data(), decomp.size(), &actual, fmt);
+    if (dr != DEFLATE_OK || actual != slen || std::memcmp(src, decomp.data(), slen) != 0) {
+        std::fprintf(stderr, "  [WARN] round-trip mismatch!\n");
+        return r;
+    }
+
+    r.ratio_pct = 100.0 * static_cast<double>(clen) / static_cast<double>(slen);
 
     auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i) {
-        actual = 0;
-        deflate_decompress(comp.data(), clen, out.data(), out.size(), &actual, fmt);
-    }
+    for (int i = 0; i < iters; ++i)
+        deflate_compress(src, slen, comp.data(), bound, level, fmt);
     auto t1 = Clock::now();
 
-    const double secs  = std::chrono::duration<double>(t1 - t0).count();
-    const double bytes = static_cast<double>(len) * iterations;
-    return bytes / secs / (1024.0 * 1024.0);
+    auto t2 = Clock::now();
+    for (int i = 0; i < iters; ++i) {
+        actual = 0;
+        deflate_decompress(comp.data(), clen, decomp.data(), decomp.size(), &actual, fmt);
+    }
+    auto t3 = Clock::now();
+
+    const double mb      = static_cast<double>(slen * static_cast<size_t>(iters)) / 1e6;
+    r.comp_mbs   = mb / std::chrono::duration<double>(t1 - t0).count();
+    r.decomp_mbs = mb / std::chrono::duration<double>(t3 - t2).count();
+    r.ok = true;
+    return r;
 }
 
-int main(int argc, char* argv[]) {
-    int iters = 100;
-    if (argc > 1) iters = std::atoi(argv[1]);
-    if (iters < 1) iters = 1;
-
-    /* Build test datasets */
-    std::string text;
-    for (int i = 0; i < 2000; ++i)
-        text += "The quick brown fox jumps over the lazy dog. ";
-    const auto* tp  = reinterpret_cast<const uint8_t*>(text.data());
-    const size_t tl = text.size();
-
-    std::vector<uint8_t> zeros(1 << 20, 0);  /* 1 MB zeros */
-
-    std::vector<uint8_t> rnd(1 << 20);
-    {
-        uint32_t st = 0xABCDEF01U;
-        for (auto& b : rnd) {
-            st ^= st << 13; st ^= st >> 17; st ^= st << 5;
-            b = static_cast<uint8_t>(st);
-        }
+static void print_result(const char* label, int level, const char* fmt_name, const BenchResult& r) {
+    if (!r.ok) {
+        std::printf("  %-16s  lvl=%2d  fmt=%-4s  FAILED\n", label, level, fmt_name);
+        return;
     }
+    std::printf("  %-16s  lvl=%2d  fmt=%-4s  comp=%7.1f MB/s  decomp=%7.1f MB/s  ratio=%5.1f%%\n",
+        label, level, fmt_name, r.comp_mbs, r.decomp_mbs, r.ratio_pct);
+}
 
-    struct Dataset { const uint8_t* p; size_t len; const char* name; };
-    Dataset datasets[] = {
-        { tp,            tl,           "text (~90KB)"  },
-        { zeros.data(),  zeros.size(), "zeros (1MB)"   },
-        { rnd.data(),    rnd.size(),   "random (1MB)"  },
+static std::vector<uint8_t> make_text() {
+    std::vector<uint8_t> v;
+    const char* pat = "The quick brown fox jumps over the lazy dog. ";
+    const size_t pl = std::strlen(pat);
+    for (int i = 0; i < 2000; ++i)
+        v.insert(v.end(), reinterpret_cast<const uint8_t*>(pat),
+                           reinterpret_cast<const uint8_t*>(pat) + pl);
+    return v;
+}
+static std::vector<uint8_t> make_zeros(size_t n) { return std::vector<uint8_t>(n, 0); }
+static std::vector<uint8_t> make_random(size_t n) {
+    std::vector<uint8_t> v(n);
+    uint32_t s = 0xABCDEF01u;
+    for (auto& b : v) { s ^= s<<13; s ^= s>>17; s ^= s<<5; b = (uint8_t)s; }
+    return v;
+}
+static std::vector<uint8_t> make_code(size_t n) {
+    std::vector<uint8_t> v(n);
+    const char* pat = "int foo(int x) { return x * 2 + 1; }\n";
+    const size_t pl = std::strlen(pat);
+    for (size_t i = 0; i < n; ++i) v[i] = (uint8_t)pat[i % pl];
+    return v;
+}
+
+int main(int argc, char** argv) {
+    const int iters = (argc > 1) ? std::atoi(argv[1]) : 100;
+
+    std::printf("Deflate benchmark  iters=%d\n\n", iters);
+
+    struct { const char* label; std::vector<uint8_t> data; } datasets[] = {
+        { "text (~90KB)",  make_text()           },
+        { "zeros (1MB)",   make_zeros(1 << 20)   },
+        { "random (1MB)",  make_random(1 << 20)  },
+        { "code (~512KB)", make_code(512 * 1024) },
     };
 
-    static const int levels[] = { 1, 3, 6, 9 };
-    static const char* fmt_names[] = { "raw", "zlib", "gzip" };
+    static const int    levels[]    = { 1, 3, 6, 9 };
+    static const char*  fmt_names[] = { "raw", "zlib", "gzip" };
     static const deflate_format fmts[] = {
         DEFLATE_FORMAT_RAW, DEFLATE_FORMAT_ZLIB, DEFLATE_FORMAT_GZIP
     };
 
-    std::printf("%-30s  %4s  %4s  %12s  %12s\n",
-        "dataset", "lvl", "fmt", "comp MB/s", "decomp MB/s");
-    std::printf("%s\n", std::string(72, '-').c_str());
-
-    for (const auto& ds : datasets) {
+    for (auto& ds : datasets) {
+        std::printf("[%s]\n", ds.label);
         for (int level : levels) {
             for (int fi = 0; fi < 3; ++fi) {
-                const double comp_mbs = bench_compress_once(
-                    ds.p, ds.len, level, fmts[fi], iters);
-                const double decomp_mbs = bench_decompress_once(
-                    ds.p, ds.len, level, fmts[fi], iters);
-
-                std::printf("%-30s  %4d  %4s  %12.1f  %12.1f\n",
-                    ds.name, level, fmt_names[fi], comp_mbs, decomp_mbs);
+                auto r = run(ds.data.data(), ds.data.size(), level, fmts[fi], iters);
+                print_result("orot-deflate", level, fmt_names[fi], r);
             }
         }
+        std::putchar('\n');
     }
 
     return 0;
