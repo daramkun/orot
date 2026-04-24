@@ -85,7 +85,7 @@ endif()
 
 # ── Benchmark (opt-in: -DOROT_DEFLATE_BENCH=ON) ───────────────────────────────────
 if(OROT_DEFLATE_BENCH)
-  add_orot_benchmark(bench_compress bench/bench_compress.cpp)
+  add_orot_benchmark(bench_deflate bench/bench_compress.cpp)
 endif()
 
 # ── LZ4 Benchmark (opt-in: -DOROT_LZ4_BENCH=ON) ────────────────────────────────────
@@ -107,13 +107,13 @@ if(OROT_DEFLATE_COMPARE_BENCH)
     message(FATAL_ERROR "libdeflate not found. Install with: brew install libdeflate")
   endif()
 
-  add_executable(bench_compare bench/bench_compare.cpp)
-  target_link_libraries(bench_compare PRIVATE orot ZLIB::ZLIB ${LIBDEFLATE_LIB})
-  target_include_directories(bench_compare PRIVATE
+  add_executable(bench_deflate_compare bench/bench_compare.cpp)
+  target_link_libraries(bench_deflate_compare PRIVATE orot ZLIB::ZLIB ${LIBDEFLATE_LIB})
+  target_include_directories(bench_deflate_compare PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${LIBDEFLATE_INCLUDE}
     )
-  target_compile_options(bench_compare PRIVATE -O3)
+  target_compile_options(bench_deflate_compare PRIVATE -O3)
   message(STATUS "Deflate: comparison benchmark enabled (zlib + libdeflate)")
 endif()
 

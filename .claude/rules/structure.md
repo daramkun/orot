@@ -4,10 +4,11 @@
 
 ```
 orot/
-├── include/deflate/
+├── include/orot/
 │   ├── deflate.h           # C API (whole-buffer, streaming, parallel)
 │   ├── deflate_types.h     # 에러코드, enum, allocator 인터페이스
-│   └── deflate.hpp         # C++ RAII 래퍼
+│   ├── deflate.hpp         # C++ RAII 래퍼
+│   └── lz4.h               # LZ4 C API (block + frame)
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -26,9 +27,13 @@ orot/
 │   │   ├── raw_deflate.{cpp,hpp}   # RFC 1951: raw DEFLATE
 │   │   ├── zlib_wrapper.{cpp,hpp}  # RFC 1950: zlib 프레이밍 (Adler-32)
 │   │   └── gzip_wrapper.{cpp,hpp}  # RFC 1952: gzip 프레이밍 (CRC-32, 헤더)
+│   ├── lz4/                # LZ4 구현 (OROT_LZ4=ON 시 빌드)
+│   │   ├── lz4_block.cpp   # LZ4 raw block 압축/해제
+│   │   └── lz4_frame.cpp   # LZ4 frame 포맷 (XXH32 체크섬)
 │   ├── api/                # C API 진입점
 │   │   ├── c_api.cpp       # whole-buffer compress/decompress + 체크섬
-│   │   └── stream_api.cpp  # 스트리밍 + 병렬 API
+│   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
+│   │   └── lz4_api.cpp     # LZ4 C API 진입점
 │   ├── parallel/           # 멀티스레드 압축 (pigz 스타일)
 │   │   ├── thread_pool.{cpp,hpp}           # 고정 스레드 풀 실행기
 │   │   ├── parallel_compressor.{cpp,hpp}   # 블록 분할 + 병합 워커
@@ -52,16 +57,20 @@ orot/
 │       └── aligned_alloc.hpp   # 정렬 메모리 헬퍼
 ├── tests/
 │   ├── unit/
-│   │   ├── test_roundtrip.cpp   # 압축 ↔ 해제 라운드트립
-│   │   ├── test_formats.cpp     # Raw/Zlib/Gzip 포맷
-│   │   ├── test_levels.cpp      # 13개 압축 레벨
-│   │   ├── test_streaming.cpp   # 스트리밍 API 점진적 공급
-│   │   ├── test_huffman.cpp     # Huffman 테이블 정확성
-│   │   ├── test_parallel.cpp    # 멀티스레드 압축
-│   │   └── test_simd.cpp        # SIMD 가속 경로
+│   │   ├── test_roundtrip.cpp        # DEFLATE 압축 ↔ 해제 라운드트립
+│   │   ├── test_formats.cpp          # Raw/Zlib/Gzip 포맷
+│   │   ├── test_levels.cpp           # 13개 압축 레벨
+│   │   ├── test_streaming.cpp        # 스트리밍 API 점진적 공급
+│   │   ├── test_huffman.cpp          # Huffman 테이블 정확성
+│   │   ├── test_parallel.cpp         # 멀티스레드 압축
+│   │   ├── test_simd.cpp             # SIMD 가속 경로
+│   │   ├── test_lz4.cpp              # LZ4 block/frame 라운드트립
+│   │   └── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
 │   ├── bench/
-│   │   ├── bench_compress.cpp   # 단일 라이브러리 처리량 벤치마크
-│   │   └── bench_compare.cpp    # 비교 벤치마크 (zlib, libdeflate)
+│   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
+│   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
+│   │   ├── bench_lz4.cpp             # LZ4 단일 라이브러리 벤치 (→ bench_lz4)
+│   │   └── bench_lz4_compare.cpp     # LZ4 비교 벤치 (liblz4) (→ bench_lz4_compare)
 │   ├── compat/
 │   │   └── test_compat.cpp      # 교차 라이브러리 호환성 (126 케이스)
 │   └── fuzz/
@@ -71,7 +80,7 @@ orot/
 │   ├── DetectSIMD.cmake      # CPU 기능 프로빙
 │   ├── CompilerFlags.cmake   # LTO, 경고, 최적화
 │   └── InstallConfig.cmake   # 설치 타겟
-├── CMakeLists.txt            # 빌드 설정 (C++20, SIMD 감지, 13개 타겟)
+├── CMakeLists.txt            # 빌드 설정 (C++20, SIMD 감지)
 └── PLAN.md                   # 구현 로드맵 (모든 항목 완료)
 ```
 
@@ -79,14 +88,17 @@ orot/
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 최적화 |
-| `DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
-| `DEFLATE_TESTS` | OFF | 유닛 + 퍼즈 테스트 |
-| `DEFLATE_BENCH` | OFF | 성능 벤치마크 |
-| `DEFLATE_ZLIB_COMPAT` | ON | zlib 호환 매크로 별칭 (Z_OK 등) |
-| `DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
-| `DEFLATE_COMPARE_BENCH` | OFF | zlib/libdeflate 비교 벤치마크 |
-| `DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
+| `OROT_DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 최적화 |
+| `OROT_DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
+| `OROT_DEFLATE_TESTS` | OFF | 유닛 + 퍼즈 테스트 |
+| `OROT_DEFLATE_BENCH` | OFF | DEFLATE 성능 벤치마크 (→ `bench_deflate`) |
+| `OROT_DEFLATE_ZLIB_COMPAT` | ON | zlib 호환 매크로 별칭 (Z_OK 등) |
+| `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
+| `OROT_DEFLATE_COMPARE_BENCH` | OFF | DEFLATE 비교 벤치마크 (→ `bench_deflate_compare`, zlib+libdeflate 필요) |
+| `OROT_DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
+| `OROT_LZ4` | ON | LZ4 압축 지원 활성화 |
+| `OROT_LZ4_BENCH` | OFF | LZ4 성능 벤치마크 (→ `bench_lz4`) |
+| `OROT_LZ4_COMPARE_BENCH` | OFF | LZ4 비교 벤치마크 (→ `bench_lz4_compare`, liblz4 필요) |
 
 ## 핵심 타입
 
@@ -134,6 +146,15 @@ deflate_parallel_compress()
 // 체크섬
 deflate_adler32()
 deflate_crc32()
+
+// LZ4 block (lz4.h)
+orot_lz4_compress_bound()
+orot_lz4_compress()
+orot_lz4_decompress()
+
+// LZ4 frame (lz4.h)
+orot_lz4f_compress()
+orot_lz4f_decompress()
 ```
 
 ## C++ API

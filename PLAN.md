@@ -308,7 +308,7 @@ ctest --test-dir build --output-on-failure
 # 비교 벤치마크
 cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
 cmake --build build -j
-./build/tests/bench_compare
+./build/tests/bench_deflate_compare
 
 # 호환성 테스트
 cmake -B build -DOROT_DEFLATE_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON

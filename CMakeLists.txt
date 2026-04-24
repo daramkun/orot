@@ -50,13 +50,11 @@ if(OROT_DEFLATE_THREADS)
     )
 endif()
 
-if(OROT_LZ4)
-  list(APPEND OROT_DEFLATE_CORE_SOURCES
-        src/lz4/lz4_block.cpp
-        src/lz4/lz4_frame.cpp
-        src/api/lz4_api.cpp
-    )
-endif()
+set(OROT_LZ4_SOURCES
+    src/lz4/lz4_block.cpp
+    src/lz4/lz4_frame.cpp
+    src/api/lz4_api.cpp
+)
 
 # ── SIMD object libraries (each with its own compile flags) ──────────────────
 set(OROT_DEFLATE_SIMD_OBJECTS "")
@@ -143,9 +141,13 @@ endif()
 
 # ── Main library target ───────────────────────────────────────────────────────
 if(OROT_DEFLATE_SHARED)
-  add_library(orot SHARED ${OROT_DEFLATE_CORE_SOURCES} ${OROT_DEFLATE_SIMD_OBJECTS})
+  add_library(orot SHARED ${OROT_DEFLATE_CORE_SOURCES}
+        $<$<BOOL:${OROT_LZ4}>:${OROT_LZ4_SOURCES}>
+        ${OROT_DEFLATE_SIMD_OBJECTS})
 else()
-  add_library(orot STATIC ${OROT_DEFLATE_CORE_SOURCES} ${OROT_DEFLATE_SIMD_OBJECTS})
+  add_library(orot STATIC ${OROT_DEFLATE_CORE_SOURCES}
+        $<$<BOOL:${OROT_LZ4}>:${OROT_LZ4_SOURCES}>
+        ${OROT_DEFLATE_SIMD_OBJECTS})
 endif()
 
 target_include_directories(orot
