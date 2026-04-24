@@ -45,7 +45,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
       -DOROT_BENCHMARK=ON \
       -DOROT_BENCHMARK_COMPARE=ON \
-      -DOROT_DEFLATE_COMPAT_TEST=ON
+      
 cmake --build build -j$(nproc)
 ```
 
@@ -264,7 +264,7 @@ cmake --build build -v 2>&1 | grep -i "simd\|sse\|avx\|neon"
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_COMPAT_TEST=ON
+      
 cmake --build build -j$(nproc)
 ```
 

@@ -93,9 +93,9 @@ orot/
 | `OROT_TESTS` | OFF | 유닛 + 퍼즈 테스트 |
 | `OROT_BENCHMARK` | OFF | DEFLATE 성능 벤치마크 (→ `bench_deflate`) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | zlib 호환 매크로 별칭 (Z_OK 등) |
-| `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
+| `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_BENCHMARK_COMPARE` | OFF | DEFLATE 비교 벤치마크 (→ `bench_deflate_compare`, zlib+libdeflate 필요) |
-| `OROT_DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
+| `OROT_TESTS` | OFF | 교차 라이브러리 호환성 테스트 |
 | `OROT_LZ4` | ON | LZ4 압축 지원 활성화 |
 | `OROT_BENCHMARK` | OFF | LZ4 성능 벤치마크 (→ `bench_lz4`) |
 | `OROT_BENCHMARK_COMPARE` | OFF | LZ4 비교 벤치마크 (→ `bench_lz4_compare`, liblz4 필요) |

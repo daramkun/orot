@@ -66,7 +66,7 @@ cmake --build build -j$(nproc)
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_COMPAT_TEST=ON
+      
 cmake --build build -j$(nproc)
 ```
 

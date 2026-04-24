@@ -36,7 +36,7 @@ cmake --build build -j$(nproc)
 ### 공유 라이브러리로 빌드
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_DEFLATE_SHARED=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_SHARED=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -57,9 +57,9 @@ cmake --install build --prefix /usr/local
 | `OROT_TESTS` | OFF | 유닛 테스트 빌드 |
 | `OROT_BENCHMARK` | OFF | 단일 라이브러리 벤치마크 |
 | `OROT_BENCHMARK_COMPARE` | OFF | zlib/libdeflate 비교 벤치마크 |
-| `OROT_DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
+| `OROT_TESTS` | OFF | 교차 라이브러리 호환성 테스트 |
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
-| `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
+| `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
 | `OROT_LZ4` | ON | LZ4 압축 지원 (block + frame) |
 | `OROT_BENCHMARK` | OFF | LZ4 단일 라이브러리 벤치마크 |
@@ -105,7 +105,7 @@ ctest --test-dir build -R "roundtrip|formats|levels"
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
+      -DOROT_TESTS=ON 
 cmake --build build -j$(nproc)
 ctest --test-dir build -R compat
 ```

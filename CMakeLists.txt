@@ -15,9 +15,8 @@ option(OROT_TESTS                "Build unit tests"                             
 option(OROT_BENCHMARK            "Build benchmarks"                                  ON)
 option(OROT_BENCHMARK_COMPARE    "Build comparison benchmarks (needs zlib+libdeflate+liblz4)" ON)
 option(OROT_DEFLATE_FUZZ         "Build fuzz targets"                                OFF)
-option(OROT_DEFLATE_SHARED       "Build shared library"                              OFF)
+option(OROT_SHARED               "Build shared library"                              OFF)
 option(OROT_DEFLATE_ZLIB_COMPAT  "Build zlib-compatible C aliases"                   ON)
-option(OROT_DEFLATE_COMPAT_TEST  "Cross-library compatibility tests (needs zlib+libdeflate)" OFF)
 option(OROT_LZ4                  "Enable LZ4 compression support"                    ON)
 
 include(cmake/DetectSIMD.cmake)
@@ -138,7 +137,7 @@ if(OROT_USE_SIMD)
 endif()
 
 # ── Main library target ───────────────────────────────────────────────────────
-if(OROT_DEFLATE_SHARED)
+if(OROT_SHARED)
   add_library(orot SHARED ${OROT_DEFLATE_CORE_SOURCES}
         $<$<BOOL:${OROT_LZ4}>:${OROT_LZ4_SOURCES}>
         ${OROT_DEFLATE_SIMD_OBJECTS})

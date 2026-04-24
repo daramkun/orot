@@ -280,7 +280,7 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 ## 작업 2: 교차 호환성 테스트
 
 **파일**: `tests/compat/test_compat.cpp`  
-**빌드 옵션**: `-DOROT_DEFLATE_COMPAT_TEST=ON` (zlib + libdeflate 필요)
+**빌드 옵션**: `` (zlib + libdeflate 필요)
 
 ### 테스트 매트릭스
 압축 × 압축해제 × 포맷(ZLIB, GZIP) 전체 조합.
@@ -311,7 +311,7 @@ cmake --build build -j
 ./build/tests/bench_deflate_compare
 
 # 호환성 테스트
-cmake -B build -DOROT_TESTS=ON -DOROT_DEFLATE_COMPAT_TEST=ON
+cmake -B build -DOROT_TESTS=ON 
 cmake --build build -j
 ./build/tests/test_compat
 ```

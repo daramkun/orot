@@ -137,19 +137,17 @@ if(OROT_BENCHMARK_COMPARE)
   endif()
 endif()
 
-# ── Cross-library compatibility tests (opt-in: -DOROT_DEFLATE_COMPAT_TEST=ON) ────────────
-if(OROT_DEFLATE_COMPAT_TEST)
-  find_package(ZLIB REQUIRED)
-  find_library(LIBDEFLATE_LIB deflate
-        HINTS /opt/homebrew/lib ${CMAKE_INSTALL_PREFIX}/lib
-        PATH_SUFFIXES lib)
-  find_path(LIBDEFLATE_INCLUDE libdeflate.h
-        HINTS /opt/homebrew/include ${CMAKE_INSTALL_PREFIX}/include
-        PATH_SUFFIXES include)
-  if(NOT LIBDEFLATE_LIB OR NOT LIBDEFLATE_INCLUDE)
-    message(FATAL_ERROR "libdeflate not found. Install with: brew install libdeflate")
-  endif()
-
+# ── Cross-library compatibility tests (auto when OROT_TESTS=ON + zlib+libdeflate present) ──
+find_package(ZLIB QUIET)
+find_library(LIBDEFLATE_LIB deflate
+      HINTS /opt/homebrew/lib ${CMAKE_INSTALL_PREFIX}/lib
+      PATH_SUFFIXES lib)
+find_path(LIBDEFLATE_INCLUDE libdeflate.h
+      HINTS /opt/homebrew/include ${CMAKE_INSTALL_PREFIX}/include
+      PATH_SUFFIXES include)
+if(ZLIB_FOUND AND LIBDEFLATE_LIB AND LIBDEFLATE_INCLUDE)
   add_subdirectory(compat)
   message(STATUS "Deflate: cross-library compatibility tests enabled")
+else()
+  message(STATUS "Deflate: skipping compat tests (zlib or libdeflate not found)")
 endif()
