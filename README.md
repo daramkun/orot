@@ -234,7 +234,7 @@ target_link_libraries(your_target PRIVATE orot)
 ### C++ (whole-buffer)
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 // 압축
 std::vector<uint8_t> input = ...;
@@ -249,7 +249,7 @@ std::vector<uint8_t> restored =
 ### C++ (streaming)
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 // 압축
 orot::deflate::Compressor cmp(orot::deflate::Level::Default, orot::deflate::Format::Zlib);
@@ -266,7 +266,7 @@ size_t written = dec.feed(compressed_span, outbuf, done);
 ### C++ (병렬 압축)
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 orot::deflate::ParallelCompressor pc(
     orot::deflate::Level::Default,

@@ -7,7 +7,7 @@ orot/
 ├── include/orot/
 │   ├── deflate.h           # C API (whole-buffer, streaming, parallel)
 │   ├── deflate_types.h     # 에러코드, enum, allocator 인터페이스
-│   ├── deflate.hpp         # C++ RAII 래퍼
+│   ├── deflate.h           # C++ RAII 래퍼
 │   └── lz4.h               # LZ4 C API (block + frame)
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
@@ -103,7 +103,7 @@ orot/
 ## 핵심 타입
 
 ```c
-// deflate_types.h / deflate.hpp
+// deflate_types.h / deflate.h
 deflate_result    // OK, STREAM_END, NEED_INPUT/OUTPUT, DATA_ERROR, MEM_ERROR
 deflate_format    // RAW, ZLIB, GZIP
 deflate_flush     // NO_FLUSH, SYNC_FLUSH, FULL_FLUSH, FINISH
@@ -160,7 +160,7 @@ orot_lz4f_decompress()
 ## C++ API
 
 ```cpp
-// deflate.hpp
+// deflate.h
 deflate::compress<std::vector<uint8_t>>()
 deflate::decompress<std::vector<uint8_t>>()
 deflate::Compressor::feed(span) / finish(span)

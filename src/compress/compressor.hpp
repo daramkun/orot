@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "level_config.hpp"
-#include "../core/lz77.hpp"
+#include "../deflate/lz77.hpp"
 #include "../memory/arena.hpp"
 #include "../memory/aligned_alloc.hpp"
 #include "../deflate_fwd.hpp"

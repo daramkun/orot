@@ -1,6 +1,6 @@
 #include "lz4_frame.hpp"
 #include "lz4_block.hpp"
-#include "../core/xxhash32.hpp"
+#include "xxhash32.hpp"
 
 #include <cstring>
 #include <memory>

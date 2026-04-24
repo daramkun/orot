@@ -1,5 +1,5 @@
 #include "simd_dispatch.hpp"
-#include "../core/lz77.hpp"  /* for match_length_scalar */
+#include "../deflate/lz77.hpp"  /* for match_length_scalar */
 
 #include <cstring>
 

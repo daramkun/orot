@@ -1,6 +1,6 @@
 #include "block_compressor.hpp"
-#include "core/deflate_block.hpp"
-#include "core/bit_writer.hpp"
+#include "deflate/deflate_block.hpp"
+#include "deflate/bit_writer.hpp"
 
 #include <cassert>
 #include <cstring>

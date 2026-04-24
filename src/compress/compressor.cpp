@@ -1,5 +1,5 @@
 #include "compressor.hpp"
-#include "../core/deflate_block.hpp"
+#include "../deflate/deflate_block.hpp"
 
 #include <algorithm>
 #include <cassert>

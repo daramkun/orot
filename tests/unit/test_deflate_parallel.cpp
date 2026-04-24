@@ -10,7 +10,7 @@
 #include <string>
 #include <thread>
 
-#include "orot/deflate.hpp"
+#include "orot/deflate.h"
 
 static int failures = 0;
 

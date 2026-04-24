@@ -39,9 +39,9 @@ if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can
   # observe coverage inside the decompressor, not just the harness.
   set(OROT_DEFLATE_FUZZ_SOURCES
-        ${CMAKE_SOURCE_DIR}/src/core/huffman.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/lz77.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/deflate_block.cpp
+        ${CMAKE_SOURCE_DIR}/src/deflate/huffman.cpp
+        ${CMAKE_SOURCE_DIR}/src/deflate/lz77.cpp
+        ${CMAKE_SOURCE_DIR}/src/deflate/deflate_block.cpp
         ${CMAKE_SOURCE_DIR}/src/compress/compressor.cpp
         ${CMAKE_SOURCE_DIR}/src/compress/block_compressor.cpp
         ${CMAKE_SOURCE_DIR}/src/decompress/decompressor.cpp

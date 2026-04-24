@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "orot/deflate.hpp"
+#include "orot/deflate.h"
 
 using Clock = std::chrono::steady_clock;
 

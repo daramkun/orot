@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include "../core/lz77.hpp"
-#include "../core/deflate_block.hpp"
+#include "../deflate/lz77.hpp"
+#include "../deflate/deflate_block.hpp"
 
 namespace orot { namespace deflate {
 

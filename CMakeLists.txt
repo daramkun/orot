@@ -28,9 +28,9 @@ include(cmake/InstallConfig.cmake)
 
 # ── Core sources (no special SIMD flags) ─────────────────────────────────────
 set(OROT_DEFLATE_CORE_SOURCES
-    src/core/huffman.cpp
-    src/core/lz77.cpp
-    src/core/deflate_block.cpp
+    src/deflate/huffman.cpp
+    src/deflate/lz77.cpp
+    src/deflate/deflate_block.cpp
     src/compress/compressor.cpp
     src/compress/block_compressor.cpp
     src/decompress/decompressor.cpp

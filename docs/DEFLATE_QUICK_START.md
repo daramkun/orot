@@ -276,7 +276,7 @@ L9: 일회성 압축 (백업, 배포 파일)
 ### Whole-Buffer 압축/해제
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 // 압축
 std::vector<uint8_t> input = /* data */;
@@ -298,7 +298,7 @@ assert(input == restored);  // 정합성 확인
 ### 스트리밍 압축
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 orot::deflate::Compressor compressor(
     orot::deflate::Level::Default,
@@ -320,7 +320,7 @@ size_t final_written = compressor.finish(
 ### 병렬 압축
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 orot::deflate::ParallelCompressor pc(
     orot::deflate::Level::Default,

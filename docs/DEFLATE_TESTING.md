@@ -412,7 +412,7 @@ deflate_compress(data, len, out, cap, 9, fmt);
 ### 3. 병렬 압축 활용
 
 ```cpp
-#include <orot/deflate.hpp>
+#include <orot/deflate.h>
 
 // 멀티스레드 압축 (자동 스레드 수)
 orot::deflate::ParallelCompressor pc(

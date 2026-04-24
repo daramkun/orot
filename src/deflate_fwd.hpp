@@ -1,7 +1,7 @@
 #pragma once
 
 /* Internal-only forward types for src/ implementation files.
- * External users include <orot/deflate.hpp> instead. */
+ * External users include <orot/deflate.h> instead. */
 
 #include <cstdint>
 #include <cstddef>

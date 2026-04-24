@@ -1,7 +1,7 @@
 #include "parallel_compressor.hpp"
-#include "../core/deflate_block.hpp"
-#include "../core/lz77.hpp"
-#include "../core/bit_writer.hpp"
+#include "../deflate/deflate_block.hpp"
+#include "../deflate/lz77.hpp"
+#include "../deflate/bit_writer.hpp"
 #include "../compress/level_config.hpp"
 #include "../simd/simd_dispatch.hpp"
 

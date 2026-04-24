@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "../core/huffman.hpp"
-#include "../core/bit_reader.hpp"
+#include "../deflate/huffman.hpp"
+#include "../deflate/bit_reader.hpp"
 
 namespace orot { namespace deflate {
 

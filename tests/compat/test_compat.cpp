@@ -19,7 +19,7 @@
 #include <functional>
 
 /* ── Library headers ─────────────────────────────────────────────────── */
-#include "orot/deflate.hpp"
+#include "orot/deflate.h"
 #include <zlib.h>
 #include <libdeflate.h>
 

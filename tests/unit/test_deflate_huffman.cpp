@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "core/huffman.hpp"
+#include "deflate/huffman.hpp"
 
 static int failures = 0;
 
