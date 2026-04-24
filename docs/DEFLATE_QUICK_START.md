@@ -43,7 +43,7 @@ cmake --build build -j$(nproc)
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON
+      -DOROT_BENCHMARK=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -56,8 +56,8 @@ cmake --build build -j$(nproc)
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON \
-      -DOROT_DEFLATE_COMPARE_BENCH=ON
+      -DOROT_BENCHMARK=ON \
+      -DOROT_BENCHMARK_COMPARE=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -410,7 +410,7 @@ deflate_compress(..., DEFLATE_FORMAT_GZIP);
 **A:**
 1. 빌드 타입 확인: `-DCMAKE_BUILD_TYPE=Release`
 2. 레벨 낮추기: L6 → L1
-3. SIMD 활성화: `-DOROT_DEFLATE_SIMD=ON` (기본)
+3. SIMD 활성화: `-DOROT_USE_SIMD=ON` (기본)
 
 ### Q: 메모리 사용량이 많으면?
 
@@ -438,7 +438,7 @@ set -e
 echo "Building..."
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON
+      -DOROT_BENCHMARK=ON
 cmake --build build -j$(nproc)
 
 echo "Running tests..."
@@ -456,7 +456,7 @@ echo "✓ All validations passed!"
 - name: Build DEFLATE
   run: |
     cmake -B build -DCMAKE_BUILD_TYPE=Release \
-          -DOROT_TESTS=ON -DOROT_DEFLATE_BENCH=ON
+          -DOROT_TESTS=ON -DOROT_BENCHMARK=ON
     cmake --build build -j4
 
 - name: Run tests

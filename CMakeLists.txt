@@ -9,18 +9,16 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
-option(OROT_DEFLATE_SIMD         "Enable SIMD acceleration"                         ON)
-option(OROT_DEFLATE_THREADS      "Enable parallel compression"                       ON)
-option(OROT_TESTS        "Build unit tests"                                  OFF)
-option(OROT_DEFLATE_BENCH        "Build benchmarks"                                  OFF)
+option(OROT_USE_SIMD             "Enable SIMD acceleration"                          ON)
+option(OROT_AS_PARALLEL          "Enable parallel compression"                       ON)
+option(OROT_TESTS                "Build unit tests"                                  ON)
+option(OROT_BENCHMARK            "Build benchmarks"                                  ON)
+option(OROT_BENCHMARK_COMPARE    "Build comparison benchmarks (needs zlib+libdeflate+liblz4)" ON)
 option(OROT_DEFLATE_FUZZ         "Build fuzz targets"                                OFF)
 option(OROT_DEFLATE_SHARED       "Build shared library"                              OFF)
 option(OROT_DEFLATE_ZLIB_COMPAT  "Build zlib-compatible C aliases"                   ON)
-option(OROT_DEFLATE_COMPARE_BENCH "Build comparison benchmarks (needs zlib+libdeflate)" OFF)
 option(OROT_DEFLATE_COMPAT_TEST  "Cross-library compatibility tests (needs zlib+libdeflate)" OFF)
-option(OROT_LZ4                  "Enable LZ4 compression support"                           ON)
-option(OROT_LZ4_BENCH            "Build LZ4 benchmarks"                               OFF)
-option(OROT_LZ4_COMPARE_BENCH    "Build LZ4 comparison benchmarks (needs liblz4)"     OFF)
+option(OROT_LZ4                  "Enable LZ4 compression support"                    ON)
 
 include(cmake/DetectSIMD.cmake)
 include(cmake/CompilerFlags.cmake)
@@ -42,7 +40,7 @@ set(OROT_DEFLATE_CORE_SOURCES
     src/api/stream_api.cpp
 )
 
-if(OROT_DEFLATE_THREADS)
+if(OROT_AS_PARALLEL)
   list(APPEND OROT_DEFLATE_CORE_SOURCES
         src/parallel/thread_pool.cpp
         src/parallel/parallel_compressor.cpp
@@ -59,7 +57,7 @@ set(OROT_LZ4_SOURCES
 # ── SIMD object libraries (each with its own compile flags) ──────────────────
 set(OROT_DEFLATE_SIMD_OBJECTS "")
 
-if(OROT_DEFLATE_SIMD)
+if(OROT_USE_SIMD)
   add_library(orot_deflate_simd_detect OBJECT src/simd/simd_detect.cpp)
   target_include_directories(orot_deflate_simd_detect PRIVATE
         ${CMAKE_SOURCE_DIR}/include
@@ -159,20 +157,20 @@ target_include_directories(orot
 )
 
 target_compile_definitions(orot PRIVATE
-    $<$<BOOL:${OROT_DEFLATE_SIMD}>:DEFLATE_SIMD_ENABLED>
+    $<$<BOOL:${OROT_USE_SIMD}>:DEFLATE_SIMD_ENABLED>
     $<$<BOOL:${DEFLATE_HAS_SSE2}>:DEFLATE_HAS_SSE2>
     $<$<BOOL:${DEFLATE_HAS_SSE42}>:DEFLATE_HAS_SSE42>
     $<$<BOOL:${DEFLATE_HAS_AVX2}>:DEFLATE_HAS_AVX2>
     $<$<BOOL:${DEFLATE_HAS_NEON}>:DEFLATE_HAS_NEON>
     $<$<BOOL:${DEFLATE_HAS_CRC_ARM}>:DEFLATE_HAS_CRC_ARM>
-    $<$<BOOL:${OROT_DEFLATE_THREADS}>:DEFLATE_THREADS_ENABLED>
+    $<$<BOOL:${OROT_AS_PARALLEL}>:DEFLATE_THREADS_ENABLED>
     $<$<BOOL:${OROT_DEFLATE_ZLIB_COMPAT}>:DEFLATE_ZLIB_COMPAT>
     $<$<BOOL:${OROT_LZ4}>:OROT_HAS_LZ4>
 )
 
 deflate_set_compiler_flags(orot)
 
-if(OROT_DEFLATE_THREADS)
+if(OROT_AS_PARALLEL)
   find_package(Threads REQUIRED)
   target_link_libraries(orot PRIVATE Threads::Threads)
 endif()

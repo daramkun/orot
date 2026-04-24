@@ -260,7 +260,7 @@ Software prefetch는 Apple M-series 하드웨어 prefetcher와 충돌하여 제�
 ## 작업 1: 비교 벤치마크
 
 **파일**: `tests/bench/bench_compare.cpp`  
-**빌드 옵션**: `-DOROT_DEFLATE_COMPARE_BENCH=ON` (zlib + libdeflate 필요)
+**빌드 옵션**: `-DOROT_BENCHMARK_COMPARE=ON` (zlib + libdeflate 필요)
 
 ### 측정 지표
 - 압축/압축해제 처리량 (MB/s)
@@ -306,7 +306,7 @@ Phase 상태머신 (HEADER→DATA→TRAILER→DONE) 구현:
 ctest --test-dir build --output-on-failure
 
 # 비교 벤치마크
-cmake -B build -DOROT_TESTS=ON -DOROT_DEFLATE_COMPARE_BENCH=ON
+cmake -B build -DOROT_TESTS=ON -DOROT_BENCHMARK_COMPARE=ON
 cmake --build build -j
 ./build/tests/bench_deflate_compare
 

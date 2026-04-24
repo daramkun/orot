@@ -40,11 +40,11 @@ cmake --build . -j$(nproc)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DOROT_DEFLATE_SIMD=ON \
-      -DOROT_DEFLATE_THREADS=ON \
+      -DOROT_USE_SIMD=ON \
+      -DOROT_AS_PARALLEL=ON \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON \
-      -DOROT_DEFLATE_COMPARE_BENCH=ON \
+      -DOROT_BENCHMARK=ON \
+      -DOROT_BENCHMARK_COMPARE=ON \
       -DOROT_DEFLATE_COMPAT_TEST=ON
 cmake --build build -j$(nproc)
 ```
@@ -354,8 +354,8 @@ sudo apt-get install zlib1g-dev libdeflate-dev  # Ubuntu
 # 빌드
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON \
-      -DOROT_DEFLATE_COMPARE_BENCH=ON
+      -DOROT_BENCHMARK=ON \
+      -DOROT_BENCHMARK_COMPARE=ON
 cmake --build build -j$(nproc)
 
 # 실행
@@ -390,10 +390,10 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake -DCMAKE_CXX_FLAGS="-O3 -march=native -flto" ..
 
 # SIMD 활성화 (기본)
-cmake -DOROT_DEFLATE_SIMD=ON ..
+cmake -DOROT_USE_SIMD=ON ..
 
 # 스레딩 활성화 (기본)
-cmake -DOROT_DEFLATE_THREADS=ON ..
+cmake -DOROT_AS_PARALLEL=ON ..
 ```
 
 ### 2. 레벨별 선택
@@ -547,7 +547,7 @@ gprof ./build/tests/bench_compress gmon.out | less
 해결: cmake -DCMAKE_BUILD_TYPE=Release
 
 원인 2: SIMD 비활성화
-확인: cmake -DOROT_DEFLATE_SIMD=ON
+확인: cmake -DOROT_USE_SIMD=ON
 테스트: ./build/tests/unit/test_simd
 
 원인 3: 레벨이 너무 높음
@@ -601,7 +601,7 @@ brew install zlib libdeflate
 sudo apt-get install zlib1g-dev libdeflate-dev
 
 # 또는 비교 벤치마크 비활성화
-cmake -DOROT_DEFLATE_COMPARE_BENCH=OFF ..
+cmake -DOROT_BENCHMARK_COMPARE=OFF ..
 ```
 
 #### "CMake 3.20 미만"
@@ -642,8 +642,8 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
             -DOROT_TESTS=ON \
-            -DOROT_DEFLATE_BENCH=ON \
-            -DOROT_DEFLATE_COMPARE_BENCH=ON
+            -DOROT_BENCHMARK=ON \
+            -DOROT_BENCHMARK_COMPARE=ON
           cmake --build build -j4
       
       - name: Run tests
@@ -664,7 +664,7 @@ test:deflate:
         cmake g++ clang zlib1g-dev libdeflate-dev
   script:
     - cmake -B build -DCMAKE_BUILD_TYPE=Release
-        -DOROT_TESTS=ON -DOROT_DEFLATE_BENCH=ON
+        -DOROT_TESTS=ON -DOROT_BENCHMARK=ON
     - cmake --build build -j4
     - ctest --test-dir build --output-on-failure
 ```
@@ -680,7 +680,7 @@ pipeline {
       steps {
         sh '''
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            -DOROT_TESTS=ON -DOROT_DEFLATE_BENCH=ON
+            -DOROT_TESTS=ON -DOROT_BENCHMARK=ON
           cmake --build build -j4
         '''
       }

@@ -52,18 +52,18 @@ cmake --install build --prefix /usr/local
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `OROT_DEFLATE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 가속 |
-| `OROT_DEFLATE_THREADS` | ON | 병렬 압축 (pigz 스타일) |
+| `OROT_USE_SIMD` | ON | SSE2/SSE4.2/AVX2/NEON/CRC 가속 |
+| `OROT_AS_PARALLEL` | ON | 병렬 압축 (pigz 스타일) |
 | `OROT_TESTS` | OFF | 유닛 테스트 빌드 |
-| `OROT_DEFLATE_BENCH` | OFF | 단일 라이브러리 벤치마크 |
-| `OROT_DEFLATE_COMPARE_BENCH` | OFF | zlib/libdeflate 비교 벤치마크 |
+| `OROT_BENCHMARK` | OFF | 단일 라이브러리 벤치마크 |
+| `OROT_BENCHMARK_COMPARE` | OFF | zlib/libdeflate 비교 벤치마크 |
 | `OROT_DEFLATE_COMPAT_TEST` | OFF | 교차 라이브러리 호환성 테스트 |
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
 | `OROT_DEFLATE_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
 | `OROT_LZ4` | ON | LZ4 압축 지원 (block + frame) |
-| `OROT_LZ4_BENCH` | OFF | LZ4 단일 라이브러리 벤치마크 |
-| `OROT_LZ4_COMPARE_BENCH` | OFF | liblz4 비교 벤치마크 |
+| `OROT_BENCHMARK` | OFF | LZ4 단일 라이브러리 벤치마크 |
+| `OROT_BENCHMARK_COMPARE` | OFF | liblz4 비교 벤치마크 |
 
 ## 테스트
 
@@ -152,7 +152,7 @@ cmake --build build -j$(nproc)
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON
+      -DOROT_BENCHMARK=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_compress [iterations]
 ```
@@ -161,8 +161,8 @@ cmake --build build -j$(nproc)
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
-      -DOROT_DEFLATE_BENCH=ON \
-      -DOROT_DEFLATE_COMPARE_BENCH=ON
+      -DOROT_BENCHMARK=ON \
+      -DOROT_BENCHMARK_COMPARE=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_compare [iterations]
 ```
@@ -182,7 +182,7 @@ Random (L1):  1100+ MB/s 압축, 1000+ MB/s 해제
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
       -DOROT_LZ4=ON \
-      -DOROT_LZ4_BENCH=ON
+      -DOROT_BENCHMARK=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_lz4 [iterations]
 ```
@@ -202,7 +202,7 @@ Random (L1):    90 MB/s 압축, 31K+ MB/s 해제
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_TESTS=ON \
       -DOROT_LZ4=ON \
-      -DOROT_LZ4_COMPARE_BENCH=ON
+      -DOROT_BENCHMARK_COMPARE=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_lz4_compare [iterations]
 ```

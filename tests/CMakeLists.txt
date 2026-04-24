@@ -83,19 +83,18 @@ if(OROT_DEFLATE_FUZZ)
   endforeach()
 endif()
 
-# ── Benchmark (opt-in: -DOROT_DEFLATE_BENCH=ON) ───────────────────────────────────
-if(OROT_DEFLATE_BENCH)
+# ── Benchmarks (-DOROT_BENCHMARK=ON) ─────────────────────────────────────────
+if(OROT_BENCHMARK)
   add_orot_benchmark(bench_deflate bench/bench_deflate.cpp)
+  message(STATUS "Deflate: performance benchmark enabled")
+  if(OROT_LZ4)
+    add_orot_benchmark(bench_lz4 bench/bench_lz4.cpp)
+    message(STATUS "LZ4: performance benchmark enabled")
+  endif()
 endif()
 
-# ── LZ4 Benchmark (opt-in: -DOROT_LZ4_BENCH=ON) ────────────────────────────────────
-if(OROT_LZ4_BENCH)
-  add_orot_benchmark(bench_lz4 bench/bench_lz4.cpp)
-  message(STATUS "LZ4: performance benchmark enabled")
-endif()
-
-# ── Comparison benchmark (opt-in: -DOROT_DEFLATE_COMPARE_BENCH=ON, needs zlib+libdeflate) ──
-if(OROT_DEFLATE_COMPARE_BENCH)
+# ── Comparison benchmarks (-DOROT_BENCHMARK_COMPARE=ON) ──────────────────────
+if(OROT_BENCHMARK_COMPARE)
   find_package(ZLIB REQUIRED)
   find_library(LIBDEFLATE_LIB deflate
         HINTS /opt/homebrew/lib ${CMAKE_INSTALL_PREFIX}/lib
@@ -115,33 +114,27 @@ if(OROT_DEFLATE_COMPARE_BENCH)
     )
   target_compile_options(bench_deflate_compare PRIVATE -O3)
   message(STATUS "Deflate: comparison benchmark enabled (zlib + libdeflate)")
-endif()
 
-# ── LZ4 comparison benchmark (opt-in: -DOROT_LZ4_COMPARE_BENCH=ON, needs liblz4) ──
-if(OROT_LZ4_COMPARE_BENCH)
-  if(NOT OROT_LZ4)
-    message(FATAL_ERROR "OROT_LZ4_COMPARE_BENCH requires -DOROT_LZ4=ON")
+  if(OROT_LZ4)
+    find_library(LZ4_LIB lz4
+          HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+          PATH_SUFFIXES lib)
+    find_path(LZ4_INCLUDE_DIR lz4.h
+          HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
+          PATH_SUFFIXES include)
+    if(NOT LZ4_LIB OR NOT LZ4_INCLUDE_DIR)
+      message(FATAL_ERROR "liblz4 not found. Install with: brew install lz4")
+    endif()
+
+    add_executable(bench_lz4_compare bench/bench_lz4_compare.cpp)
+    target_link_libraries(bench_lz4_compare PRIVATE orot ${LZ4_LIB})
+    target_include_directories(bench_lz4_compare PRIVATE
+          ${CMAKE_SOURCE_DIR}/include
+          ${LZ4_INCLUDE_DIR}
+      )
+    target_compile_options(bench_lz4_compare PRIVATE -O3)
+    message(STATUS "LZ4: comparison benchmark enabled (orot + liblz4)")
   endif()
-
-  find_library(LZ4_LIB lz4
-        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
-        PATH_SUFFIXES lib)
-  find_path(LZ4_INCLUDE_DIR lz4.h
-        HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
-        PATH_SUFFIXES include)
-
-  if(NOT LZ4_LIB OR NOT LZ4_INCLUDE_DIR)
-    message(FATAL_ERROR "liblz4 not found. Install with: brew install lz4")
-  endif()
-
-  add_executable(bench_lz4_compare bench/bench_lz4_compare.cpp)
-  target_link_libraries(bench_lz4_compare PRIVATE orot ${LZ4_LIB})
-  target_include_directories(bench_lz4_compare PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${LZ4_INCLUDE_DIR}
-    )
-  target_compile_options(bench_lz4_compare PRIVATE -O3)
-  message(STATUS "LZ4: comparison benchmark enabled (orot + liblz4)")
 endif()
 
 # ── Cross-library compatibility tests (opt-in: -DOROT_DEFLATE_COMPAT_TEST=ON) ────────────

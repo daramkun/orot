@@ -39,14 +39,14 @@ cmake --build .
 ### Build Performance Benchmarks
 
 ```bash
-cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
+cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_BENCHMARK=ON
 cmake --build . --target bench_lz4
 ```
 
 Build the comparison benchmark against `liblz4`:
 
 ```bash
-cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_LZ4_COMPARE_BENCH=ON
+cmake .. -DOROT_TESTS=ON -DOROT_LZ4=ON -DOROT_BENCHMARK_COMPARE=ON
 cmake --build . --target bench_lz4_compare
 ```
 
@@ -303,7 +303,7 @@ cmake --build . --target bench_lz4
 ```yaml
 - name: Build LZ4 tests
   run: |
-    cmake -B build -DOROT_LZ4=ON -DOROT_LZ4_BENCH=ON
+    cmake -B build -DOROT_LZ4=ON -DOROT_BENCHMARK=ON
     cmake --build build
 
 - name: Run unit tests
