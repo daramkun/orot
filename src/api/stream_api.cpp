@@ -1,4 +1,4 @@
-#include "orot/deflate.h"
+#include "../deflate_fwd.hpp"
 #include "compress/compressor.hpp"
 #include "decompress/decompressor.hpp"
 #include "parallel/parallel_compressor.hpp"

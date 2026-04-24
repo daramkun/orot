@@ -13,7 +13,7 @@
 #include <cstring>
 #include <vector>
 
-#include "orot/deflate.h"
+#include "orot/deflate.hpp"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size < 2) return 0;

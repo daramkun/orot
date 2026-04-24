@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "thread_pool.hpp"
-#include "../../include/orot/deflate_types.h"
+#include "../deflate_fwd.hpp"
 
 namespace orot { namespace deflate {
 

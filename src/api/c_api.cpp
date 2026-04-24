@@ -1,4 +1,4 @@
-#include "orot/deflate.h"
+#include "../deflate_fwd.hpp"
 #include "formats/raw_deflate.hpp"
 #include "formats/zlib_wrapper.hpp"
 #include "formats/gzip_wrapper.hpp"

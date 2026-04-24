@@ -6,7 +6,7 @@
 #include "../core/lz77.hpp"
 #include "../memory/arena.hpp"
 #include "../memory/aligned_alloc.hpp"
-#include "../../include/orot/deflate_types.h"
+#include "../deflate_fwd.hpp"
 
 namespace orot { namespace deflate {
 

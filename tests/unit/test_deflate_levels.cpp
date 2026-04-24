@@ -8,7 +8,7 @@
 #include <vector>
 #include <string>
 
-#include "orot/deflate.h"
+#include "orot/deflate.hpp"
 
 static int failures = 0;
 

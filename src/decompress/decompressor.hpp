@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "inflate_fast.hpp"
-#include "../../include/orot/deflate_types.h"
+#include "../deflate_fwd.hpp"
 #include "../memory/arena.hpp"
 #include "../memory/aligned_alloc.hpp"
 
