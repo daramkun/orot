@@ -154,7 +154,7 @@ public:
         size_t         avail_in  = in.size();
         uint8_t*       next_out  = out.data();
         size_t         avail_out = out.size();
-        deflate_result r = deflate_stream_decompress(
+        deflate_result r = inflate_stream_decompress(
             s_, &next_in, &avail_in, &next_out, &avail_out);
         if (r == DEFLATE_STREAM_END) { done = true; }
         else if (r < 0) throw Error(r, "Decompressor::feed failed");

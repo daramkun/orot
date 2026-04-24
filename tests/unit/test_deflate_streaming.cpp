@@ -1,6 +1,6 @@
 /*
  * test_streaming.cpp — Streaming (incremental) compression API tests.
- * Verifies deflate_stream_compress / deflate_stream_decompress work correctly
+ * Verifies deflate_stream_compress / inflate_stream_decompress work correctly
  * when data is fed in small chunks.
  */
 #include <cassert>
@@ -101,7 +101,7 @@ static std::vector<uint8_t> stream_decompress(
             uint8_t* next_out  = tmp;
             size_t   rem_out   = avail_out;
 
-            deflate_result r = deflate_stream_decompress(
+            deflate_result r = inflate_stream_decompress(
                 s, &next_in, &rem_in, &next_out, &rem_out);
 
             const size_t produced = avail_out - rem_out;
@@ -126,7 +126,7 @@ static std::vector<uint8_t> stream_decompress(
             size_t   avail_out = std::min(out_chunk, sizeof(tmp));
             uint8_t* next_out  = tmp;
             size_t   rem_out   = avail_out;
-            deflate_result r = deflate_stream_decompress(
+            deflate_result r = inflate_stream_decompress(
                 s, &empty_in, &empty_rem, &next_out, &rem_out);
             const size_t produced = avail_out - rem_out;
             out.insert(out.end(), tmp, tmp + produced);

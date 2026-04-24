@@ -21,13 +21,13 @@ macro(add_orot_benchmark TARGET SOURCE)
 endmacro()
 
 # ── Unit tests ────────────────────────────────────────────────────────────────
-add_unit_test(test_roundtrip  unit/test_roundtrip.cpp)
-add_unit_test(test_huffman    unit/test_huffman.cpp)
-add_unit_test(test_formats    unit/test_formats.cpp)
-add_unit_test(test_levels     unit/test_levels.cpp)
-add_unit_test(test_streaming  unit/test_streaming.cpp)
-add_unit_test(test_simd       unit/test_simd.cpp)
-add_unit_test(test_parallel   unit/test_parallel.cpp)
+add_unit_test(test_deflate_roundtrip  unit/test_deflate_roundtrip.cpp)
+add_unit_test(test_deflate_huffman    unit/test_deflate_huffman.cpp)
+add_unit_test(test_deflate_formats    unit/test_deflate_formats.cpp)
+add_unit_test(test_deflate_levels     unit/test_deflate_levels.cpp)
+add_unit_test(test_deflate_streaming  unit/test_deflate_streaming.cpp)
+add_unit_test(test_deflate_simd       unit/test_deflate_simd.cpp)
+add_unit_test(test_deflate_parallel   unit/test_deflate_parallel.cpp)
 
 if(OROT_LZ4)
   add_unit_test(test_lz4 unit/test_lz4.cpp)
@@ -85,7 +85,7 @@ endif()
 
 # ── Benchmark (opt-in: -DOROT_DEFLATE_BENCH=ON) ───────────────────────────────────
 if(OROT_DEFLATE_BENCH)
-  add_orot_benchmark(bench_deflate bench/bench_compress.cpp)
+  add_orot_benchmark(bench_deflate bench/bench_deflate.cpp)
 endif()
 
 # ── LZ4 Benchmark (opt-in: -DOROT_LZ4_BENCH=ON) ────────────────────────────────────
@@ -107,7 +107,7 @@ if(OROT_DEFLATE_COMPARE_BENCH)
     message(FATAL_ERROR "libdeflate not found. Install with: brew install libdeflate")
   endif()
 
-  add_executable(bench_deflate_compare bench/bench_compare.cpp)
+  add_executable(bench_deflate_compare bench/bench_deflate_compare.cpp)
   target_link_libraries(bench_deflate_compare PRIVATE orot ZLIB::ZLIB ${LIBDEFLATE_LIB})
   target_include_directories(bench_deflate_compare PRIVATE
         ${CMAKE_SOURCE_DIR}/include

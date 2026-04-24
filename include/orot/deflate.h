@@ -66,7 +66,7 @@ deflate_result deflate_stream_compress(
 deflate_stream* inflate_stream_new(deflate_format format);
 void            inflate_stream_free(deflate_stream* s);
 
-deflate_result deflate_stream_decompress(
+deflate_result inflate_stream_decompress(
     deflate_stream*  s,
     const uint8_t**  next_in,  size_t* avail_in,
     uint8_t**        next_out, size_t* avail_out
