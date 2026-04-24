@@ -160,6 +160,10 @@ int lz4_block_compress(
 
     ip++; /* advance past first position */
 
+    /* Adaptive-step counter for fast path: starts at 64 so step=1 initially,
+     * increases by 1 every 64 consecutive misses to skip incompressible runs. */
+    uint32_t step_ctr = 64;
+
     while (ip < match_limit) {
         uint32_t h = lz4_hash(ip);
         uint32_t candidate_pos = state.head[h];
@@ -229,8 +233,13 @@ int lz4_block_compress(
         }
 
         if (best_len < LZ4_MIN_MATCH) {
-            /* No match: advance one byte */
-            ++ip;
+            if (cfg.fast_path) {
+                /* Adaptive skip: step grows ~1 per 64 consecutive misses.
+                 * Avoids O(n) hashing on incompressible runs. */
+                ip += step_ctr++ >> 6;
+            } else {
+                ++ip;
+            }
             continue;
         }
 
@@ -242,11 +251,15 @@ int lz4_block_compress(
         ip += best_len;
         anchor = ip;
 
-        /* Insert intermediate positions into hash */
-        if (!cfg.fast_path) {
-            const uint8_t* fill = ip - best_len + 1;
-            while (fill < ip && fill < match_limit) {
-                uint32_t fh  = lz4_hash(fill);
+        if (cfg.fast_path) {
+            step_ctr = 64; /* reset skip counter after each match */
+        } else {
+            /* Insert intermediate positions into hash, capped to avoid O(match_len)
+             * cost on highly compressible data with very long matches. */
+            const uint8_t* fill     = ip - best_len + 1;
+            const uint8_t* fill_cap = fill + 8;
+            while (fill < ip && fill < fill_cap && fill < match_limit) {
+                uint32_t fh   = lz4_hash(fill);
                 uint32_t fabs = static_cast<uint32_t>(fill - src);
                 state.prev[fabs & LZ4_WIN_MASK] = state.head[fh];
                 state.head[fh] = fabs;

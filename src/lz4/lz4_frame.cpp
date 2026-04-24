@@ -71,8 +71,11 @@ int lz4f_compress(
     uint8_t hdr_buf[2] = { flg, bd };
     *out++ = header_checksum(hdr_buf, 2);
 
-    /* Allocate block compress buffer + LZ4State on heap */
-    int block_bound = lz4_block_compress_bound(LZ4F_BLOCK_MAX);
+    /* Allocate block compress buffer + LZ4State on heap.
+     * Use actual data size (capped at block max) to avoid large mmap allocations
+     * for small inputs. */
+    int actual_block_max = (src_len < LZ4F_BLOCK_MAX) ? src_len : LZ4F_BLOCK_MAX;
+    int block_bound = lz4_block_compress_bound(actual_block_max);
     std::unique_ptr<uint8_t[]> block_buf(new (std::nothrow) uint8_t[block_bound]);
     if (!block_buf) return -1;
 
@@ -182,10 +185,6 @@ int lz4f_decompress(
 
     XXH32State content_xxh;
     content_xxh.reset(0);
-
-    /* Allocate decompression scratch buffer */
-    std::unique_ptr<uint8_t[]> scratch(new (std::nothrow) uint8_t[LZ4F_BLOCK_MAX]);
-    if (!scratch) return -1;
 
     uint8_t* op     = dst;
     uint8_t* op_end = dst + dst_cap;
