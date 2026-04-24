@@ -32,6 +32,8 @@ add_unit_test(test_deflate_parallel   unit/test_deflate_parallel.cpp)
 add_unit_test(test_lz4 unit/test_lz4.cpp)
 add_unit_test(test_lz4_comprehensive unit/test_lz4_comprehensive.cpp)
 
+add_unit_test(test_lzw unit/test_lzw.cpp)
+
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
 if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can
@@ -85,7 +87,8 @@ endif()
 if(OROT_BENCHMARK)
   add_orot_benchmark(bench_deflate bench/bench_deflate.cpp)
   add_orot_benchmark(bench_lz4 bench/bench_lz4.cpp)
-  message(STATUS "Deflate + LZ4: performance benchmarks enabled")
+  add_orot_benchmark(bench_lzw bench/bench_lzw.cpp)
+  message(STATUS "Deflate + LZ4 + LZW: performance benchmarks enabled")
 endif()
 
 # ── Comparison benchmarks (-DOROT_BENCHMARK_COMPARE=ON) ──────────────────────
@@ -128,6 +131,10 @@ if(OROT_BENCHMARK_COMPARE)
     )
   target_compile_options(bench_lz4_compare PRIVATE -O3)
   message(STATUS "LZ4: comparison benchmark enabled (orot + liblz4)")
+
+  # LZW comparison — bundles its own reference implementation; no external lib needed.
+  add_orot_benchmark(bench_lzw_compare bench/bench_lzw_compare.cpp)
+  message(STATUS "LZW: comparison benchmark enabled (orot vs bundled reference)")
 endif()
 
 # ── Cross-library compatibility tests (auto when OROT_TESTS=ON + zlib+libdeflate present) ──
