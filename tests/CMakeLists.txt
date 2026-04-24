@@ -47,7 +47,7 @@ if(OROT_DEFLATE_FUZZ)
         ${CMAKE_SOURCE_DIR}/src/formats/raw_deflate.cpp
         ${CMAKE_SOURCE_DIR}/src/formats/zlib_wrapper.cpp
         ${CMAKE_SOURCE_DIR}/src/formats/gzip_wrapper.cpp
-        ${CMAKE_SOURCE_DIR}/src/api/c_api.cpp
+        ${CMAKE_SOURCE_DIR}/src/api/deflate_api.cpp
         ${CMAKE_SOURCE_DIR}/src/api/stream_api.cpp
         # simd_detect without any SIMD macros → pure scalar fallbacks
         ${CMAKE_SOURCE_DIR}/src/simd/simd_detect.cpp

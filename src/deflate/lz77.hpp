@@ -95,17 +95,6 @@ inline uint32_t lz77_hash4_n(const uint8_t* p, int bits) noexcept {
     return (v * 0x9E3779B1U) >> (32 - bits);
 }
 
-/* ── Scalar match length ─────────────────────────────────────────────────── */
-
-/**
- * Returns the length of the common prefix of a[] and b[], up to max_len.
- * This is the scalar fallback; SIMD paths override via simd_dispatch.hpp.
- */
-int match_length_scalar(
-    const uint8_t* a,
-    const uint8_t* b,
-    int max_len) noexcept;
-
 /* ── LZ77 compression ────────────────────────────────────────────────────── */
 
 /**

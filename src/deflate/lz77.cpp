@@ -35,36 +35,6 @@ LZ77Config lz77_config_for_level(int level) {
     return configs[level];
 }
 
-/* =========================================================================
- * Scalar match length
- * ========================================================================= */
-
-int match_length_scalar(
-    const uint8_t* a,
-    const uint8_t* b,
-    int max_len) noexcept
-{
-    int len = 0;
-    /* Process 8 bytes at a time */
-    while (len + 8 <= max_len) {
-        uint64_t wa, wb;
-        std::memcpy(&wa, a + len, 8);
-        std::memcpy(&wb, b + len, 8);
-        uint64_t diff = wa ^ wb;
-        if (diff) {
-            /* Find first differing byte via ctz */
-#if defined(__GNUC__) || defined(__clang__)
-            len += static_cast<int>(__builtin_ctzll(diff) >> 3);
-#else
-            while (len < max_len && a[len] == b[len]) ++len;
-#endif
-            return len;
-        }
-        len += 8;
-    }
-    while (len < max_len && a[len] == b[len]) ++len;
-    return len;
-}
 
 /* =========================================================================
  * Dictionary insertion

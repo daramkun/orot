@@ -1,6 +1,6 @@
 #include "simd_dispatch.hpp"
-#include "../deflate/lz77.hpp"  /* for match_length_scalar */
 
+#include <cstdint>
 #include <cstring>
 
 namespace orot { namespace deflate {
@@ -10,7 +10,24 @@ namespace orot { namespace deflate {
  * ========================================================================= */
 
 int scalar_match_length(const uint8_t* a, const uint8_t* b, int max_len) {
-    return match_length_scalar(a, b, max_len);
+    int len = 0;
+    while (len + 8 <= max_len) {
+        uint64_t wa, wb;
+        std::memcpy(&wa, a + len, 8);
+        std::memcpy(&wb, b + len, 8);
+        uint64_t diff = wa ^ wb;
+        if (diff) {
+#if defined(__GNUC__) || defined(__clang__)
+            len += static_cast<int>(__builtin_ctzll(diff) >> 3);
+#else
+            while (len < max_len && a[len] == b[len]) ++len;
+#endif
+            return len;
+        }
+        len += 8;
+    }
+    while (len < max_len && a[len] == b[len]) ++len;
+    return len;
 }
 
 uint32_t scalar_crc32(uint32_t crc, const uint8_t* data, size_t len) {

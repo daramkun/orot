@@ -34,7 +34,7 @@ set(OROT_DEFLATE_CORE_SOURCES
     src/formats/raw_deflate.cpp
     src/formats/zlib_wrapper.cpp
     src/formats/gzip_wrapper.cpp
-    src/api/c_api.cpp
+    src/api/deflate_api.cpp
     src/api/stream_api.cpp
 )
 
