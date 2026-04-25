@@ -57,6 +57,14 @@ set(OROT_LZW_SOURCES
     src/api/lzw_api.cpp
 )
 
+set(OROT_LZMA_SOURCES
+    src/lzma/lzma_compress.cpp
+    src/lzma/lzma_decompress.cpp
+    src/lzma/lzma2_compress.cpp
+    src/lzma/lzma2_decompress.cpp
+    src/api/lzma_api.cpp
+)
+
 # ── SIMD object libraries (each with its own compile flags) ──────────────────
 set(OROT_DEFLATE_SIMD_OBJECTS "")
 
@@ -145,11 +153,13 @@ if(OROT_SHARED)
   add_library(orot SHARED ${OROT_DEFLATE_CORE_SOURCES}
         ${OROT_LZ4_SOURCES}
         ${OROT_LZW_SOURCES}
+        ${OROT_LZMA_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 else()
   add_library(orot STATIC ${OROT_DEFLATE_CORE_SOURCES}
         ${OROT_LZ4_SOURCES}
         ${OROT_LZW_SOURCES}
+        ${OROT_LZMA_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 endif()
 
@@ -172,6 +182,7 @@ target_compile_definitions(orot PRIVATE
     $<$<BOOL:${OROT_DEFLATE_ZLIB_COMPAT}>:DEFLATE_ZLIB_COMPAT>
     OROT_HAS_LZ4
     OROT_HAS_LZW
+    OROT_HAS_LZMA
 )
 
 deflate_set_compiler_flags(orot)

@@ -34,6 +34,8 @@ add_unit_test(test_lz4_comprehensive unit/test_lz4_comprehensive.cpp)
 
 add_unit_test(test_lzw unit/test_lzw.cpp)
 
+add_unit_test(test_lzma unit/test_lzma.cpp)
+
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
 if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can
@@ -88,7 +90,8 @@ if(OROT_BENCHMARK)
   add_orot_benchmark(bench_deflate bench/bench_deflate.cpp)
   add_orot_benchmark(bench_lz4 bench/bench_lz4.cpp)
   add_orot_benchmark(bench_lzw bench/bench_lzw.cpp)
-  message(STATUS "Deflate + LZ4 + LZW: performance benchmarks enabled")
+  add_orot_benchmark(bench_lzma bench/bench_lzma.cpp)
+  message(STATUS "Deflate + LZ4 + LZW + LZMA: performance benchmarks enabled")
 endif()
 
 # ── Comparison benchmarks (-DOROT_BENCHMARK_COMPARE=ON) ──────────────────────
@@ -131,6 +134,25 @@ if(OROT_BENCHMARK_COMPARE)
     )
   target_compile_options(bench_lz4_compare PRIVATE -O3)
   message(STATUS "LZ4: comparison benchmark enabled (orot + liblz4)")
+
+  find_library(LIBLZMA_LIB lzma
+        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+        PATH_SUFFIXES lib)
+  find_path(LIBLZMA_INCLUDE_DIR lzma.h
+        HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
+        PATH_SUFFIXES include)
+  if(NOT LIBLZMA_LIB OR NOT LIBLZMA_INCLUDE_DIR)
+    message(FATAL_ERROR "liblzma not found. Install with: brew install xz")
+  endif()
+
+  add_executable(bench_lzma_compare bench/bench_lzma_compare.cpp)
+  target_link_libraries(bench_lzma_compare PRIVATE orot ${LIBLZMA_LIB})
+  target_include_directories(bench_lzma_compare PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${LIBLZMA_INCLUDE_DIR}
+    )
+  target_compile_options(bench_lzma_compare PRIVATE -O3)
+  message(STATUS "LZMA: comparison benchmark enabled (orot + liblzma)")
 
   # LZW comparison — bundles its own reference implementation; no external lib needed.
   add_orot_benchmark(bench_lzw_compare bench/bench_lzw_compare.cpp)

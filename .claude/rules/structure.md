@@ -8,7 +8,8 @@ orot/
 │   ├── deflate.h           # C API (whole-buffer, streaming, parallel)
 │   ├── deflate_types.h     # 에러코드, enum, allocator 인터페이스
 │   ├── deflate.h           # C++ RAII 래퍼
-│   └── lz4.h               # LZ4 C API (block + frame)
+│   ├── lz4.h               # LZ4 C API (block + frame)
+│   └── lzma.h              # LZMA/LZMA2 C/C++ API
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -30,10 +31,18 @@ orot/
 │   ├── lz4/                # LZ4 구현 
 │   │   ├── lz4_block.cpp   # LZ4 raw block 압축/해제
 │   │   └── lz4_frame.cpp   # LZ4 frame 포맷 (XXH32 체크섬)
+│   ├── lzma/               # LZMA/LZMA2 구현
+│   │   ├── range_coder.hpp         # 범위 인코더/디코더
+│   │   ├── lzma_prob_model.hpp     # 확률 테이블 + 상태기계
+│   │   ├── lzma_compress.{cpp,hpp} # LZMA alone 압축
+│   │   ├── lzma_decompress.{cpp,hpp} # LZMA alone 압축해제
+│   │   ├── lzma2_compress.cpp      # LZMA2 청크 스트림 압축
+│   │   └── lzma2_decompress.cpp    # LZMA2 청크 스트림 압축해제
 │   ├── api/                # C API 진입점
 │   │   ├── c_api.cpp       # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
-│   │   └── lz4_api.cpp     # LZ4 C API 진입점
+│   │   ├── lz4_api.cpp     # LZ4 C API 진입점
+│   │   └── lzma_api.cpp    # LZMA/LZMA2 C API 진입점
 │   ├── parallel/           # 멀티스레드 압축 (pigz 스타일)
 │   │   ├── thread_pool.{cpp,hpp}           # 고정 스레드 풀 실행기
 │   │   ├── parallel_compressor.{cpp,hpp}   # 블록 분할 + 병합 워커
@@ -64,13 +73,16 @@ orot/
 │   │   ├── test_huffman.cpp          # Huffman 테이블 정확성
 │   │   ├── test_parallel.cpp         # 멀티스레드 압축
 │   │   ├── test_simd.cpp             # SIMD 가속 경로
-│   │   ├── test_lz4.cpp              # LZ4 block/frame 라운드트립
-│   │   └── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
+│   │   ├── test_lz4.cpp              # LZ4 block/frame 라운드트립 + 에러 경로
+│   │   ├── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
+│   │   └── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
 │   │   ├── bench_lz4.cpp             # LZ4 단일 라이브러리 벤치 (→ bench_lz4)
-│   │   └── bench_lz4_compare.cpp     # LZ4 비교 벤치 (liblz4) (→ bench_lz4_compare)
+│   │   ├── bench_lz4_compare.cpp     # LZ4 비교 벤치 (liblz4) (→ bench_lz4_compare)
+│   │   ├── bench_lzma.cpp            # LZMA 단일 라이브러리 벤치 (→ bench_lzma)
+│   │   └── bench_lzma_compare.cpp    # LZMA 비교 벤치 (liblzma) (→ bench_lzma_compare)
 │   ├── compat/
 │   │   └── test_compat.cpp      # 교차 라이브러리 호환성 (126 케이스)
 │   └── fuzz/
@@ -154,6 +166,16 @@ orot_lz4_decompress()
 // LZ4 frame (lz4.h)
 orot_lz4f_compress()
 orot_lz4f_decompress()
+
+// LZMA alone (lzma.h)
+orot_lzma_compress_bound()
+orot_lzma_compress()
+orot_lzma_decompress()
+
+// LZMA2 chunk stream (lzma.h)
+orot_lzma2_compress_bound()
+orot_lzma2_compress()
+orot_lzma2_decompress()
 ```
 
 ## C++ API
