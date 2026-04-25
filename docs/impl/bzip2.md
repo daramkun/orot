@@ -142,13 +142,25 @@ cmake --build build --target bench_bzip2_compare
 
 | 데이터 | orot 압축 | libbz2 압축 | speedup | orot 해제 | libbz2 해제 | speedup |
 |--------|-----------|-------------|---------|-----------|-------------|---------|
-| zeros 1MB | ~120 MB/s | ~93 MB/s | **1.3x** | ~155 MB/s | ~1360 MB/s | 0.11x |
-| random 1MB | ~6 MB/s | ~8 MB/s | 0.75x | ~20 MB/s | ~18 MB/s | **1.1x** |
-| text 90KB | ~3 MB/s | ~7 MB/s | 0.4x | ~68 MB/s | ~180 MB/s | 0.4x |
-| code 512KB | ~2.5 MB/s | ~5 MB/s | 0.5x | ~56 MB/s | ~160 MB/s | 0.35x |
+| zeros 1MB | ~120-133 MB/s | ~65-80 MB/s | **1.4-2.2x** | ~200 MB/s | ~1000 MB/s | 0.2x |
+| random 1MB | ~3-5 MB/s | ~5-7 MB/s | 0.7-0.8x | ~16-22 MB/s | ~10-15 MB/s | **1.3-1.6x** |
+| text 90KB | ~9-12 MB/s | ~5 MB/s | **1.9-2.4x** | ~55-70 MB/s | ~120-200 MB/s | 0.25-0.5x |
+| code 512KB | ~8-11 MB/s | ~4 MB/s | **1.7-2.8x** | ~44-58 MB/s | ~120-200 MB/s | 0.2-0.4x |
+
+## 성능 최적화 내역
+
+| 최적화 | 효과 |
+|--------|------|
+| SA-IS O(n) BWT (적응형) | 압축 2-3x 향상 (구조적 데이터) |
+| BWT counting sort `%n` → 조건부 빼기 | BWT ~10-20% 향상 |
+| Huffman fast decode (10-bit 룩업 테이블) | 압축해제 1.3-2.9x (random) |
+| MTF rank==0 fast path | 소폭 전체 향상 |
+| RLE1 decode memset | zeros 해제 소폭 향상 |
+| 64-bit BitReader/Writer | 전체 속도 향상 |
+| flush_run resize+memset | 대형 run 해제 향상 |
 
 ## 알려진 제한
 
 - Randomized block (`rnd_flag=1`) 미지원 (사용 빈도 매우 낮음)
-- zeros 해제 속도: libbz2가 trivial Huffman 코드에 특화 최적화 보유, orot 0.11x
-- SIMD 가속 없음 (MSB-first CRC32는 표준 hw 명령 직접 사용 불가)
+- zeros 해제 속도: libbz2가 trivial Huffman 코드에 특화 최적화 보유, orot 0.2x (MSB-first CRC32 슬라이싱 불가)
+- random 1MB 압축: libbz2 대비 0.7-0.8x (고엔트로피 데이터는 카운팅 정렬 사용, libbz2 최적화 C 코드 우세)
