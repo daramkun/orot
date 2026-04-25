@@ -241,11 +241,26 @@ uint32_t bwt_transform(const uint8_t* in, uint8_t* out, uint32_t len,
     if (len == 0) return 0;
     if (len == 1) { out[0] = in[0]; return 0; }
 
-    /* SA-IS for large blocks (O(n) vs O(n log n) counting sort).
-       For small blocks the per-call overhead of SA-IS exceeds the gain. */
-    static constexpr uint32_t SAIS_THRESHOLD = 4096;
+    /* Algorithm selection:
+       SA-IS (O(n)) wins for compressible data with repeated patterns where
+       counting-sort prefix-doubling needs many iterations.
+       For high-entropy (random-like) data, counting sort terminates in 1-2
+       iterations via early exit, making SA-IS overhead unwarranted.
+       Heuristic: count distinct byte values in the block. ≥ 200 distinct
+       values ≈ random/incompressible → use counting sort. */
+    static constexpr uint32_t SAIS_MIN_LEN       = 4096;
+    static constexpr int      SAIS_MAX_DISTINCT   = 200;
 
-    if (len >= SAIS_THRESHOLD) {
+    bool use_sais = (len >= SAIS_MIN_LEN);
+    if (use_sais) {
+        uint32_t freq[256] = {};
+        for (uint32_t i = 0; i < len; ++i) freq[in[i]]++;
+        int distinct = 0;
+        for (int c = 0; c < 256; ++c) if (freq[c]) ++distinct;
+        if (distinct >= SAIS_MAX_DISTINCT) use_sais = false;
+    }
+
+    if (use_sais) {
         static thread_local std::vector<int32_t> t_buf;
         static thread_local std::vector<int32_t> sa_i32;
 
