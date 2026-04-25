@@ -163,13 +163,40 @@ void HuffDecTable::build_from_lengths(const uint8_t* lengths, int size) {
         for (int s = 0; s < size; ++s)
             if (lengths[s] == l) perm[pidx++] = s;
     }
+
+    /* Build fast lookup table for codes with length <= HUFF_FAST_BITS */
+    for (int i = 0; i < HUFF_FAST_SIZE; ++i)
+        fast_table[i] = { -1, 0 };
+
+    int fast_max = std::min(max_len, HUFF_FAST_BITS);
+    for (int l = 1; l <= fast_max; ++l) {
+        if (limit[l] == (uint32_t)-1) continue;
+        int num = (int)(limit[l] - base[l] + 1);
+        int fill = 1 << (HUFF_FAST_BITS - l);
+        for (int j = 0; j < num; ++j) {
+            int sym = perm[offset[l] + j];
+            uint32_t idx = (base[l] + (uint32_t)j) << (HUFF_FAST_BITS - l);
+            FastEntry e = { (int16_t)sym, (uint8_t)l };
+            for (int k = 0; k < fill; ++k)
+                fast_table[idx + k] = e;
+        }
+    }
 }
 
 int HuffDecTable::decode_sym(uint64_t& buf, int& buf_bits,
                               const uint8_t* src, size_t src_size, size_t& src_pos) const
 {
-    /* Caller pre-fills buf via refill(); no per-bit refill needed for short codes.
-       Fall back to per-bit refill only when buf runs dry (long codes / end of input). */
+    /* Fast path: peek HUFF_FAST_BITS bits and do flat lookup */
+    if (buf_bits >= HUFF_FAST_BITS) {
+        uint32_t peek = (uint32_t)((buf >> (buf_bits - HUFF_FAST_BITS)) & (HUFF_FAST_SIZE - 1));
+        const FastEntry& e = fast_table[peek];
+        if (e.sym >= 0) {
+            buf_bits -= e.len;
+            return e.sym;
+        }
+    }
+
+    /* Slow path: bit-by-bit for codes longer than HUFF_FAST_BITS, or if buf low */
     uint32_t v = 0;
     for (int l = 1; l <= max_len; ++l) {
         if (buf_bits == 0) {

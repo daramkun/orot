@@ -60,10 +60,9 @@ static bool rle1_decode(const uint8_t* in, uint32_t in_len,
         if (run_cnt == 4) {
             if (i >= in_len) return false;
             uint8_t cnt = in[i++];
-            for (int k = 0; k < cnt; ++k) {
-                if (out_len >= out_cap) return false;
-                out[out_len++] = c;
-            }
+            if (out_len + (size_t)cnt > out_cap) return false;
+            memset(out + out_len, c, (size_t)cnt);
+            out_len += (size_t)cnt;
             run_cnt = 0;
         }
     }

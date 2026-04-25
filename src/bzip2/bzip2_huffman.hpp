@@ -36,6 +36,9 @@ void build_huffman_tables(
 
 /* ── Decode side ─────────────────────────────────────────────────────────── */
 
+static constexpr int HUFF_FAST_BITS = 10;
+static constexpr int HUFF_FAST_SIZE = (1 << HUFF_FAST_BITS);
+
 struct HuffDecTable {
     /* Canonical decode tables (MSB-first) */
     int      alpha_size;
@@ -49,6 +52,12 @@ struct HuffDecTable {
     uint32_t limit[BZ_MAX_CODE_LEN + 2];
     int      offset[BZ_MAX_CODE_LEN + 2];
     uint8_t  len[BZ_MAX_ALPHA_SIZE];
+
+    struct FastEntry {
+        int16_t sym;  /* symbol, or -1 = slow path */
+        uint8_t len;  /* code length in bits */
+    };
+    FastEntry fast_table[HUFF_FAST_SIZE];
 
     void build_from_lengths(const uint8_t* lengths, int size);
 
