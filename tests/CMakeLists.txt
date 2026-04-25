@@ -36,6 +36,8 @@ add_unit_test(test_lzw unit/test_lzw.cpp)
 
 add_unit_test(test_lzma unit/test_lzma.cpp)
 
+add_unit_test(test_bzip2 unit/test_bzip2.cpp)
+
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
 if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can
@@ -91,7 +93,8 @@ if(OROT_BENCHMARK)
   add_orot_benchmark(bench_lz4 bench/bench_lz4.cpp)
   add_orot_benchmark(bench_lzw bench/bench_lzw.cpp)
   add_orot_benchmark(bench_lzma bench/bench_lzma.cpp)
-  message(STATUS "Deflate + LZ4 + LZW + LZMA: performance benchmarks enabled")
+  add_orot_benchmark(bench_bzip2 bench/bench_bzip2.cpp)
+  message(STATUS "Deflate + LZ4 + LZW + LZMA + Bzip2: performance benchmarks enabled")
 endif()
 
 # ── Comparison benchmarks (-DOROT_BENCHMARK_COMPARE=ON) ──────────────────────
