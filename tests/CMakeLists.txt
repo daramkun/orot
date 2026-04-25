@@ -157,6 +157,25 @@ if(OROT_BENCHMARK_COMPARE)
   target_compile_options(bench_lzma_compare PRIVATE -O3)
   message(STATUS "LZMA: comparison benchmark enabled (orot + liblzma)")
 
+  find_library(LIBBZ2_LIB bz2
+        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+        PATH_SUFFIXES lib)
+  find_path(LIBBZ2_INCLUDE_DIR bzlib.h
+        HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
+        PATH_SUFFIXES include)
+  if(NOT LIBBZ2_LIB OR NOT LIBBZ2_INCLUDE_DIR)
+    message(FATAL_ERROR "libbz2 not found. Install with: brew install bzip2")
+  endif()
+
+  add_executable(bench_bzip2_compare bench/bench_bzip2_compare.cpp)
+  target_link_libraries(bench_bzip2_compare PRIVATE orot ${LIBBZ2_LIB})
+  target_include_directories(bench_bzip2_compare PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${LIBBZ2_INCLUDE_DIR}
+    )
+  target_compile_options(bench_bzip2_compare PRIVATE -O3)
+  message(STATUS "Bzip2: comparison benchmark enabled (orot + libbz2)")
+
   # LZW comparison — bundles its own reference implementation; no external lib needed.
   add_orot_benchmark(bench_lzw_compare bench/bench_lzw_compare.cpp)
   message(STATUS "LZW: comparison benchmark enabled (orot vs bundled reference)")

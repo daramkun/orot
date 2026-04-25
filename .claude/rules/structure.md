@@ -94,7 +94,8 @@ orot/
 │   │   ├── bench_lz4_compare.cpp     # LZ4 비교 벤치 (liblz4) (→ bench_lz4_compare)
 │   │   ├── bench_lzma.cpp            # LZMA 단일 라이브러리 벤치 (→ bench_lzma)
 │   │   ├── bench_lzma_compare.cpp    # LZMA 비교 벤치 (liblzma) (→ bench_lzma_compare)
-│   │   └── bench_bzip2.cpp           # Bzip2 단일 라이브러리 벤치 (→ bench_bzip2)
+│   │   ├── bench_bzip2.cpp           # Bzip2 단일 라이브러리 벤치 (→ bench_bzip2)
+│   │   └── bench_bzip2_compare.cpp   # Bzip2 비교 벤치 (libbz2) (→ bench_bzip2_compare)
 │   ├── compat/
 │   │   └── test_compat.cpp      # 교차 라이브러리 호환성 (126 케이스)
 │   └── fuzz/

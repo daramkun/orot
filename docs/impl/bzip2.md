@@ -15,6 +15,7 @@
 | C++ 편의 API | ✅ |
 | 라운드트립 테스트 | ✅ |
 | 단일 벤치마크 | ✅ |
+| 비교 벤치마크 (libbz2) | ✅ |
 
 ## 구현 개요
 
@@ -104,6 +105,11 @@ cmake --build build -j
 # 벤치마크
 ./build/tests/bench_bzip2
 ./build/tests/bench_bzip2 5   # 5회 반복
+
+# 비교 벤치마크 (libbz2 필요)
+cmake -B build -DOROT_BENCHMARK_COMPARE=ON
+cmake --build build --target bench_bzip2_compare
+./build/tests/bench_bzip2_compare 5
 ```
 
 ## 성능 결과 (Apple M 계열, 1 MiB, iters=1)
