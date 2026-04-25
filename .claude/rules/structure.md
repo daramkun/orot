@@ -40,9 +40,9 @@ orot/
 │   │   ├── lzma2_compress.cpp      # LZMA2 청크 스트림 압축
 │   │   └── lzma2_decompress.cpp    # LZMA2 청크 스트림 압축해제
 │   ├── bzip2/              # Bzip2 구현
-│   │   ├── bzip2_crc.hpp           # MSB-first CRC32 (bzip2 전용)
-│   │   ├── bwt.{cpp,hpp}           # BWT + 역변환 (prefix doubling suffix sort)
-│   │   ├── mtf.hpp                 # Move-to-Front (in-use 알파벳)
+│   │   ├── bzip2_crc.hpp           # MSB-first CRC32 (constexpr 256-entry table)
+│   │   ├── bwt.{cpp,hpp}           # BWT + 역변환 (counting sort prefix doubling)
+│   │   ├── mtf.hpp                 # Move-to-Front (in-use 알파벳, rank==0 fast path)
 │   │   ├── bzip2_huffman.{cpp,hpp} # 다중 Huffman 테이블 + selector
 │   │   ├── bzip2_compress.{cpp,hpp}   # 5단계 압축 파이프라인
 │   │   └── bzip2_decompress.{cpp,hpp} # 5단계 압축해제 파이프라인
@@ -193,6 +193,7 @@ orot_lzma2_decompress()
 // Bzip2 (bzip2.h)
 orot_bzip2_compress_bound()
 orot_bzip2_compress()
+orot_bzip2_compress_parallel()
 orot_bzip2_decompress()
 ```
 

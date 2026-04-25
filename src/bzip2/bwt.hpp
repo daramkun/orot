@@ -6,9 +6,12 @@
 namespace orot::bzip2 {
 
 /* Forward BWT: transform block, return primary index.
-   out must be at least len bytes. */
+   out must be at least len bytes.
+   sa_buf: reused suffix array workspace (size n).
+   work_buf: reused sort temp workspace (size n). */
 uint32_t bwt_transform(const uint8_t* in, uint8_t* out, uint32_t len,
-                       std::vector<uint32_t>& sa_buf);
+                       std::vector<uint32_t>& sa_buf,
+                       std::vector<uint32_t>& work_buf);
 
 /* Inverse BWT: reconstruct original from BWT output + primary index. */
 void bwt_inverse(const uint8_t* in, uint8_t* out, uint32_t len,

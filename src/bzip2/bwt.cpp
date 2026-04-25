@@ -1,51 +1,92 @@
 #include "bwt.hpp"
-#include <algorithm>
 #include <vector>
+#include <cstring>
 
 namespace orot::bzip2 {
 
-/* ── Cyclic suffix array via prefix doubling (Manber-Myers, O(n log² n)) ─────
+/* ── Cyclic suffix array via prefix doubling with counting sort ─────────────
+   Replaces std::sort (O(n log² n)) with counting sort per iteration (O(n log n)).
    Works on the cyclic string: suffix i = block[i..n-1] ++ block[0..i-1]. */
 
 static void build_suffix_array(const uint8_t* block, uint32_t n,
                                 std::vector<uint32_t>& sa,
-                                std::vector<uint32_t>& work)
+                                std::vector<uint32_t>& work,
+                                std::vector<int32_t>&  rank,
+                                std::vector<int32_t>&  rank_tmp,
+                                std::vector<uint32_t>& cnt)
 {
     sa.resize(n);
-    std::vector<int32_t> rank(n), tmp(n);
+    work.resize(n);
+    rank.resize(n);
+    rank_tmp.resize(n);
 
-    /* Initial rank = byte value */
-    for (uint32_t i = 0; i < n; ++i) { sa[i] = i; rank[i] = block[i]; }
+    /* ── Initial sort by byte value ── */
+    {
+        uint32_t freq[256] = {};
+        for (uint32_t i = 0; i < n; ++i) freq[block[i]]++;
 
-    for (uint32_t gap = 1; gap < n; gap <<= 1) {
-        /* Sort by (rank[i], rank[(i+gap)%n]) */
-        auto cmp = [&](uint32_t a, uint32_t b) {
-            if (rank[a] != rank[b]) return rank[a] < rank[b];
-            int32_t ra = rank[(a + gap) % n];
-            int32_t rb = rank[(b + gap) % n];
-            return ra < rb;
-        };
-        std::sort(sa.begin(), sa.end(), cmp);
+        uint32_t pos[256];
+        uint32_t acc = 0;
+        for (int c = 0; c < 256; ++c) { pos[c] = acc; acc += freq[c]; }
+        for (uint32_t i = 0; i < n; ++i) sa[pos[block[i]]++] = i;
 
-        /* Reassign ranks */
-        tmp[sa[0]] = 0;
+        /* Assign initial ranks (equal bytes get equal rank) */
+        rank_tmp[sa[0]] = 0;
         for (uint32_t i = 1; i < n; ++i)
-            tmp[sa[i]] = tmp[sa[i-1]] + (cmp(sa[i-1], sa[i]) ? 1 : 0);
-        for (uint32_t i = 0; i < n; ++i) rank[i] = tmp[i];
-
-        if (rank[sa[n-1]] == (int32_t)(n-1)) break; /* all unique, done */
+            rank_tmp[sa[i]] = rank_tmp[sa[i-1]] + (block[sa[i]] != block[sa[i-1]] ? 1 : 0);
+        for (uint32_t i = 0; i < n; ++i) rank[i] = rank_tmp[i];
     }
-    (void)work;
+
+    /* ── Prefix doubling with two-pass counting sort per iteration ── */
+    for (uint32_t gap = 1; gap < n; gap <<= 1) {
+        /* Check for early termination: all ranks unique */
+        if (rank[sa[n-1]] == (int32_t)(n-1)) break;
+
+        /* Maximum rank value (used to size counting array) */
+        int32_t max_rank = rank[sa[n-1]];
+        uint32_t cnt_size = (uint32_t)(max_rank + 2);
+        cnt.assign(cnt_size, 0);
+
+        /* Pass 1: stable sort by second key rank[(i+gap)%n] */
+        for (uint32_t i = 0; i < n; ++i)
+            cnt[(uint32_t)rank[(sa[i] + gap) % n] + 1]++;
+        for (uint32_t i = 1; i < cnt_size; ++i) cnt[i] += cnt[i-1];
+        for (uint32_t i = 0; i < n; ++i)
+            work[cnt[(uint32_t)rank[(sa[i] + gap) % n]]++] = sa[i];
+
+        /* Pass 2: stable sort by first key rank[i] */
+        cnt.assign(cnt_size, 0);
+        for (uint32_t i = 0; i < n; ++i)
+            cnt[(uint32_t)rank[work[i]] + 1]++;
+        for (uint32_t i = 1; i < cnt_size; ++i) cnt[i] += cnt[i-1];
+        for (uint32_t i = 0; i < n; ++i)
+            sa[cnt[(uint32_t)rank[work[i]]]++] = work[i];
+
+        /* Reassign ranks based on (rank[sa[i]], rank[(sa[i]+gap)%n]) pairs */
+        rank_tmp[sa[0]] = 0;
+        for (uint32_t i = 1; i < n; ++i) {
+            bool same = (rank[sa[i]]            == rank[sa[i-1]]) &&
+                        (rank[(sa[i]+gap)%n]    == rank[(sa[i-1]+gap)%n]);
+            rank_tmp[sa[i]] = rank_tmp[sa[i-1]] + (same ? 0 : 1);
+        }
+        for (uint32_t i = 0; i < n; ++i) rank[i] = rank_tmp[i];
+    }
 }
 
 uint32_t bwt_transform(const uint8_t* in, uint8_t* out, uint32_t len,
-                       std::vector<uint32_t>& sa_buf)
+                       std::vector<uint32_t>& sa_buf,
+                       std::vector<uint32_t>& work_buf)
 {
     if (len == 0) return 0;
     if (len == 1) { out[0] = in[0]; return 0; }
 
-    std::vector<uint32_t> work;
-    build_suffix_array(in, len, sa_buf, work);
+    /* Reused rank buffers (allocated once per stream, grown as needed) */
+    static thread_local std::vector<int32_t>  rank_buf;
+    static thread_local std::vector<int32_t>  rank_tmp_buf;
+    static thread_local std::vector<uint32_t> cnt_buf;
+
+    build_suffix_array(in, len, sa_buf, work_buf,
+                       rank_buf, rank_tmp_buf, cnt_buf);
 
     uint32_t primary = 0;
     for (uint32_t i = 0; i < len; ++i) {

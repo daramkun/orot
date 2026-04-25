@@ -165,25 +165,20 @@ void HuffDecTable::build_from_lengths(const uint8_t* lengths, int size) {
     }
 }
 
-int HuffDecTable::decode_sym(uint32_t& buf, int& buf_bits,
+int HuffDecTable::decode_sym(uint64_t& buf, int& buf_bits,
                               const uint8_t* src, size_t src_size, size_t& src_pos) const
 {
-    auto read_bit = [&]() -> int {
+    /* Caller pre-fills buf via refill(); no per-bit refill needed for short codes.
+       Fall back to per-bit refill only when buf runs dry (long codes / end of input). */
+    uint32_t v = 0;
+    for (int l = 1; l <= max_len; ++l) {
         if (buf_bits == 0) {
             if (src_pos >= src_size) return -1;
             buf = (buf << 8) | src[src_pos++];
             buf_bits = 8;
         }
-        int b = (buf >> (buf_bits - 1)) & 1;
         --buf_bits;
-        return b;
-    };
-
-    uint32_t v = 0;
-    for (int l = 1; l <= max_len; ++l) {
-        int b = read_bit();
-        if (b < 0) return -1;
-        v = (v << 1) | (uint32_t)b;
+        v = (v << 1) | (uint32_t)((buf >> buf_bits) & 1);
         if (limit[l] == (uint32_t)-1) continue;
         if (v <= limit[l])
             return perm[offset[l] + (int)(v - base[l])];

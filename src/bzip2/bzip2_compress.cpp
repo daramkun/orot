@@ -3,11 +3,13 @@
 #include "bwt.hpp"
 #include "mtf.hpp"
 #include "bzip2_huffman.hpp"
+#include "parallel/thread_pool.hpp"
 
 #include <vector>
 #include <cstring>
 #include <algorithm>
 #include <cassert>
+#include <thread>
 
 namespace orot::bzip2 {
 
@@ -22,26 +24,27 @@ struct BitWriter {
     uint8_t* dst;
     size_t   cap;
     size_t   pos;
-    uint32_t buf;
-    int      buf_bits; /* bits in buf, waiting to flush */
+    uint64_t buf;
+    int      buf_bits;
+    size_t   total_bits;
 
     void write_bits(uint32_t value, int nbits) {
-        /* MSB-first */
-        for (int i = nbits - 1; i >= 0; --i) {
-            buf = (buf << 1) | ((value >> i) & 1);
-            if (++buf_bits == 8) {
-                if (pos < cap) dst[pos] = (uint8_t)buf;
-                ++pos;
-                buf = 0; buf_bits = 0;
-            }
+        /* MSB-first: accumulate into 64-bit buffer, flush bytes */
+        buf = (buf << nbits) | (uint64_t)value;
+        buf_bits += nbits;
+        total_bits += (size_t)nbits;
+        while (buf_bits >= 8) {
+            buf_bits -= 8;
+            if (pos < cap) dst[pos] = (uint8_t)(buf >> buf_bits);
+            ++pos;
         }
     }
 
     void flush() {
         if (buf_bits > 0) {
-            buf <<= (8 - buf_bits);
-            if (pos < cap) dst[pos] = (uint8_t)buf;
+            if (pos < cap) dst[pos] = (uint8_t)(buf << (8 - buf_bits));
             ++pos;
+            total_bits += (size_t)(8 - buf_bits); /* count padding bits too */
             buf = 0; buf_bits = 0;
         }
     }
@@ -143,7 +146,7 @@ static bool compress_block(
     BitWriter& bw,
     uint32_t* block_crc_out,
     std::vector<uint32_t>& sa_buf,
-    std::vector<uint32_t>& ibwt_buf)
+    std::vector<uint32_t>& work_buf)
 {
     /* CRC before any transform */
     uint32_t crc = crc32_block(block, block_len);
@@ -165,8 +168,8 @@ static bool compress_block(
 
     /* BWT */
     std::vector<uint8_t> bwt_out(rlen);
-    uint32_t primary = bwt_transform(rle1.data(), bwt_out.data(), rlen, sa_buf);
-    (void)ibwt_buf;
+    uint32_t primary = bwt_transform(rle1.data(), bwt_out.data(), rlen,
+                                     sa_buf, work_buf);
 
     /* MTF over in-use bytes only (bzip2 uses in-use alphabet, not full 256) */
     mtf_encode_inuse(bwt_out.data(), rlen, inuse_syms, n_in_use);
@@ -266,7 +269,7 @@ size_t bzip2_compress(const uint8_t* src, size_t src_size,
 {
     const int block_size = level * 100000;
 
-    BitWriter bw{dst, dst_cap, 0, 0, 0};
+    BitWriter bw{dst, dst_cap, 0, 0, 0, 0};
 
     /* Stream header: "BZh" + block-size digit */
     bw.write_bits('B', 8);
@@ -275,14 +278,14 @@ size_t bzip2_compress(const uint8_t* src, size_t src_size,
     bw.write_bits((uint32_t)('0' + level), 8);
 
     uint32_t combined_crc = 0;
-    std::vector<uint32_t> sa_buf, ibwt_buf;
+    std::vector<uint32_t> sa_buf, work_buf;
 
     size_t pos = 0;
     while (pos < src_size) {
         size_t blk = std::min((size_t)block_size, src_size - pos);
         uint32_t block_crc = 0;
         if (!compress_block(src + pos, (uint32_t)blk, bw, &block_crc,
-                            sa_buf, ibwt_buf))
+                            sa_buf, work_buf))
             return 0;
         combined_crc = crc32_combine(combined_crc, block_crc);
         pos += blk;
@@ -299,6 +302,155 @@ size_t bzip2_compress(const uint8_t* src, size_t src_size,
     bw.flush();
     if (!bw.ok()) return 0;
     return bw.pos;
+}
+
+/* ── Parallel compress helpers ───────────────────────────────────────────── */
+
+/* Append n_bits MSB-first bits from src (starting at bit 0) into dst at
+   dst_bit_offset. dst must be zero-initialized in the target region. */
+static void bit_append(uint8_t* dst, size_t dst_bit_offset,
+                        const uint8_t* src, size_t n_bits)
+{
+    if (n_bits == 0) return;
+    size_t byte_off = dst_bit_offset / 8;
+    int    shift    = (int)(dst_bit_offset % 8);
+
+    if (shift == 0) {
+        /* byte-aligned: plain copy (last byte may have padding, already zeroed) */
+        size_t n_bytes = (n_bits + 7) / 8;
+        memcpy(dst + byte_off, src, n_bytes);
+        return;
+    }
+
+    /* Non-aligned: distribute each src byte across two dst bytes */
+    size_t n_bytes = (n_bits + 7) / 8;
+    for (size_t i = 0; i < n_bytes; ++i) {
+        dst[byte_off + i]     |= (src[i] >> shift);
+        dst[byte_off + i + 1]  = (src[i] << (8 - shift));
+    }
+}
+
+size_t bzip2_compress_parallel(const uint8_t* src, size_t src_size,
+                                uint8_t* dst, size_t dst_cap,
+                                int level, int n_threads)
+{
+    if (level < 1 || level > 9 || !src || !dst) return 0;
+
+    const size_t block_size = (size_t)level * 100000;
+    const size_t n_blocks   = (src_size + block_size - 1) / block_size;
+
+    if (n_blocks == 0) {
+        /* Empty input: just write header + footer */
+        BitWriter bw{dst, dst_cap, 0, 0, 0, 0};
+        bw.write_bits('B', 8); bw.write_bits('Z', 8);
+        bw.write_bits('h', 8); bw.write_bits((uint32_t)('0' + level), 8);
+        bw.write_bits(0x1772, 16); bw.write_bits(0x4538, 16);
+        bw.write_bits(0x5090, 16);
+        bw.write_bits(0, 16); bw.write_bits(0, 16);
+        bw.flush();
+        return bw.ok() ? bw.pos : 0;
+    }
+
+    /* Single block: fall through to serial path to avoid overhead */
+    if (n_blocks == 1 || n_threads == 1) {
+        return bzip2_compress(src, src_size, dst, dst_cap, level);
+    }
+
+    /* ── Per-block compression ── */
+    struct BlockResult {
+        std::vector<uint8_t> data;   /* compressed bytes (last may have padding) */
+        size_t               n_bits; /* exact bit count (excl. padding) */
+        uint32_t             crc;
+        bool                 ok;
+    };
+
+    std::vector<BlockResult> results(n_blocks);
+
+    {
+        using orot::deflate::ThreadPool;
+        int nt = n_threads;
+        if (nt <= 0) nt = (int)std::thread::hardware_concurrency();
+        if (nt <= 0) nt = 1;
+
+        ThreadPool pool(nt);
+        for (size_t b = 0; b < n_blocks; ++b) {
+            pool.submit([&, b]() {
+                size_t start = b * block_size;
+                size_t len   = std::min(block_size, src_size - start);
+
+                size_t bound = bzip2_compress_bound(len);
+                results[b].data.assign(bound, 0);
+                BitWriter bw{results[b].data.data(), bound, 0, 0, 0, 0};
+
+                std::vector<uint32_t> sa_buf, work_buf;
+                uint32_t crc = 0;
+                results[b].ok = compress_block(src + start, (uint32_t)len,
+                                               bw, &crc, sa_buf, work_buf);
+                results[b].crc = crc;
+
+                /* Record exact bits before flush (padding not counted) */
+                size_t bits_before_pad = bw.total_bits;
+                bw.flush();
+                results[b].n_bits = bits_before_pad;
+                results[b].data.resize(bw.pos);
+            });
+        }
+        pool.wait_all();
+    }
+
+    for (size_t b = 0; b < n_blocks; ++b)
+        if (!results[b].ok) return 0;
+
+    /* ── Bit-merge into dst ── */
+    /* Zero-init dst (bit_append ORs into dst, so it must be clean) */
+    size_t total_out_bits = 32; /* stream header: 4 bytes */
+    for (size_t b = 0; b < n_blocks; ++b)
+        total_out_bits += results[b].n_bits;
+    total_out_bits += 80; /* stream footer: 48-bit magic + 32-bit CRC */
+
+    size_t total_out_bytes = (total_out_bits + 7) / 8;
+    if (total_out_bytes > dst_cap) return 0;
+    memset(dst, 0, total_out_bytes);
+
+    /* Stream header */
+    dst[0] = 'B'; dst[1] = 'Z'; dst[2] = 'h';
+    dst[3] = (uint8_t)('0' + level);
+    size_t bit_cursor = 32;
+
+    /* Blocks */
+    uint32_t combined_crc = 0;
+    for (size_t b = 0; b < n_blocks; ++b) {
+        bit_append(dst, bit_cursor, results[b].data.data(), results[b].n_bits);
+        bit_cursor += results[b].n_bits;
+        combined_crc = crc32_combine(combined_crc, results[b].crc);
+    }
+
+    /* Stream footer via a small BitWriter at the end */
+    {
+        size_t footer_byte = bit_cursor / 8;
+        int    footer_shift = (int)(bit_cursor % 8);
+        /* Use a tiny local writer to produce footer bits */
+        uint8_t footer_buf[16] = {};
+        BitWriter fw{footer_buf, sizeof(footer_buf), 0, 0, 0, 0};
+        /* If bit_cursor is not byte-aligned, the first byte of footer_buf
+           overlaps with the last partial byte of dst. We pre-load those bits. */
+        if (footer_shift != 0) {
+            fw.buf       = dst[footer_byte];
+            fw.buf_bits  = footer_shift;
+            fw.total_bits = (size_t)footer_shift;
+        }
+        fw.write_bits(0x1772, 16); fw.write_bits(0x4538, 16);
+        fw.write_bits(0x5090, 16);
+        fw.write_bits(combined_crc >> 16,   16);
+        fw.write_bits(combined_crc & 0xFFFF, 16);
+        fw.flush();
+        /* Copy footer bytes into dst */
+        size_t n = fw.pos;
+        for (size_t i = 0; i < n; ++i)
+            dst[footer_byte + i] = footer_buf[i];
+    }
+
+    return total_out_bytes;
 }
 
 } // namespace orot::bzip2

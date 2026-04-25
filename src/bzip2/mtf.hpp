@@ -17,7 +17,8 @@ struct MTFState {
 
     /* Encode one byte, return its MTF rank (0..n-1). */
     int encode(uint8_t c) {
-        int rank = 0;
+        if (sym[0] == c) return 0;  /* fast path: most common after BWT */
+        int rank = 1;
         while (rank < n && sym[rank] != c) ++rank;
         if (rank >= n) return -1; /* not in-use */
         memmove(sym + 1, sym, rank);
@@ -28,8 +29,10 @@ struct MTFState {
     /* Decode one rank (0..n-1), return the original byte. */
     uint8_t decode(int rank) {
         uint8_t c = sym[rank];
-        memmove(sym + 1, sym, rank);
-        sym[0] = c;
+        if (rank != 0) {
+            memmove(sym + 1, sym, rank);
+            sym[0] = c;
+        }
         return c;
     }
 };

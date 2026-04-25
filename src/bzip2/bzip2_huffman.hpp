@@ -53,9 +53,9 @@ struct HuffDecTable {
     void build_from_lengths(const uint8_t* lengths, int size);
 
     /* Decode one symbol. Returns symbol (>=0) or -1 on error.
-       Uses a simple {buf, buf_bits} accumulator (MSB-first).
+       Uses a 64-bit {buf, buf_bits} accumulator (MSB-first).
        buf/buf_bits must be maintained across calls to the same stream. */
-    int decode_sym(uint32_t& buf, int& buf_bits,
+    int decode_sym(uint64_t& buf, int& buf_bits,
                    const uint8_t* src, size_t src_size, size_t& src_pos) const;
 };
 

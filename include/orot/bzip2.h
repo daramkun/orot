@@ -40,6 +40,17 @@ int orot_bzip2_compress(
     int         level);
 
 /**
+ * Parallel compress using block-level parallelism.
+ * n_threads: worker thread count (0 = hardware_concurrency).
+ * Output is a valid .bz2 stream, identical in format to orot_bzip2_compress.
+ */
+int orot_bzip2_compress_parallel(
+    const void* src, size_t src_size,
+    void*       dst, size_t dst_cap,
+    int         level,
+    int         n_threads);
+
+/**
  * Decompress a bzip2 stream.
  * uncompressed_size_out: if non-NULL, receives the decompressed byte count.
  */
@@ -67,6 +78,19 @@ Container compress(std::span<const uint8_t> src,
     Container out(orot_bzip2_compress_bound(src.size()));
     int n = orot_bzip2_compress(src.data(), src.size(),
                                 out.data(), out.size(), level);
+    if (n <= 0) return {};
+    out.resize((size_t)n);
+    return out;
+}
+
+template <typename Container = std::vector<uint8_t>>
+Container compress_parallel(std::span<const uint8_t> src,
+                             int level = OROT_BZIP2_LEVEL_DEFAULT,
+                             int n_threads = 0) {
+    Container out(orot_bzip2_compress_bound(src.size()));
+    int n = orot_bzip2_compress_parallel(src.data(), src.size(),
+                                         out.data(), out.size(),
+                                         level, n_threads);
     if (n <= 0) return {};
     out.resize((size_t)n);
     return out;

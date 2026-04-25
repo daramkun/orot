@@ -14,8 +14,16 @@ struct BitReader {
     const uint8_t* src;
     size_t src_size;
     size_t pos;
-    uint32_t buf;
+    uint64_t buf;
     int buf_bits;
+
+    /* Fill buf to at least 56 bits from src */
+    void refill() {
+        while (buf_bits <= 56 && pos < src_size) {
+            buf = (buf << 8) | src[pos++];
+            buf_bits += 8;
+        }
+    }
 
     uint32_t read_bits(int n) {
         while (buf_bits < n) {
@@ -24,22 +32,23 @@ struct BitReader {
             buf_bits += 8;
         }
         buf_bits -= n;
-        return (buf >> buf_bits) & ((1u << n) - 1);
+        return (uint32_t)((buf >> buf_bits) & ((1u << n) - 1));
     }
 };
 
 /* ── RLE1 decode ─────────────────────────────────────────────────────────── */
 
 static bool rle1_decode(const uint8_t* in, uint32_t in_len,
-                         std::vector<uint8_t>& out)
+                         uint8_t* out, size_t out_cap, size_t& out_len)
 {
-    out.clear();
+    out_len = 0;
     int    run_cnt = 0;
     uint8_t run_ch = 0;
 
     for (uint32_t i = 0; i < in_len; ) {
         uint8_t c = in[i++];
-        out.push_back(c);
+        if (out_len >= out_cap) return false;
+        out[out_len++] = c;
 
         if (c == run_ch) {
             ++run_cnt;
@@ -51,8 +60,11 @@ static bool rle1_decode(const uint8_t* in, uint32_t in_len,
         if (run_cnt == 4) {
             if (i >= in_len) return false;
             uint8_t cnt = in[i++];
-            for (int k = 0; k < cnt; ++k) out.push_back(c);
-            run_cnt = 0; /* reset: count byte consumed, run is over */
+            for (int k = 0; k < cnt; ++k) {
+                if (out_len >= out_cap) return false;
+                out[out_len++] = c;
+            }
+            run_cnt = 0;
         }
     }
     return true;
@@ -61,7 +73,7 @@ static bool rle1_decode(const uint8_t* in, uint32_t in_len,
 /* ── RLE2 / Huffman decode ───────────────────────────────────────────────── */
 
 static bool decode_block(BitReader& br,
-                          std::vector<uint8_t>& out,
+                          uint8_t* dst, size_t dst_cap, size_t& written,
                           uint32_t* block_crc_out,
                           std::vector<uint32_t>& ibwt_buf)
 {
@@ -151,7 +163,6 @@ static bool decode_block(BitReader& br,
     std::vector<uint8_t> mtf_out;
     mtf_out.reserve(900000);
     int EOB = alpha_size - 1;
-    /* Use br.buf/br.buf_bits so bits left after header parsing are not lost */
     uint32_t g = 0, g_cnt = 0;
     uint8_t cur_tbl = selectors[0];
     uint32_t run = 0;
@@ -170,6 +181,9 @@ static bool decode_block(BitReader& br,
             cur_tbl = selectors[g];
         }
 
+        /* Pre-fill buffer before decode to reduce per-bit refill overhead */
+        br.refill();
+
         int sym = dec_tables[cur_tbl].decode_sym(
             br.buf, br.buf_bits, br.src, br.src_size, br.pos);
         ++g_cnt;
@@ -183,17 +197,19 @@ static bool decode_block(BitReader& br,
         mtf_out.push_back((uint8_t)(sym - 1));
     }
 
-    /* MTF decode */
+    /* MTF decode (inline, with rank==0 fast path) */
     uint32_t mtf_len = (uint32_t)mtf_out.size();
     {
         uint8_t mtf_sym[256];
         for (int i = 0; i < n_in_use; ++i) mtf_sym[i] = (uint8_t)sym_map[i];
         for (uint32_t i = 0; i < mtf_len; ++i) {
             uint8_t rank = mtf_out[i];
-            if (rank >= n_in_use) return false;
+            if ((int)rank >= n_in_use) return false;
             uint8_t c = mtf_sym[rank];
-            memmove(mtf_sym + 1, mtf_sym, rank);
-            mtf_sym[0] = c;
+            if (rank != 0) {
+                memmove(mtf_sym + 1, mtf_sym, rank);
+                mtf_sym[0] = c;
+            }
             mtf_out[i] = c;
         }
     }
@@ -202,15 +218,17 @@ static bool decode_block(BitReader& br,
     std::vector<uint8_t> bwt_inv(mtf_len);
     bwt_inverse(mtf_out.data(), bwt_inv.data(), mtf_len, primary, ibwt_buf);
 
-    /* RLE1 decode */
-    std::vector<uint8_t> rle1_dec;
-    if (!rle1_decode(bwt_inv.data(), mtf_len, rle1_dec)) return false;
+    /* RLE1 decode directly into dst */
+    size_t rle1_len = 0;
+    if (!rle1_decode(bwt_inv.data(), mtf_len, dst + written,
+                     dst_cap - written, rle1_len))
+        return false;
 
     /* Verify CRC */
-    uint32_t computed = crc32_block(rle1_dec.data(), rle1_dec.size());
+    uint32_t computed = crc32_block(dst + written, rle1_len);
     if (computed != *block_crc_out) return false;
 
-    for (uint8_t b : rle1_dec) out.push_back(b);
+    written += rle1_len;
     return true;
 }
 
@@ -228,8 +246,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
 
     BitReader br{src + 4, src_size - 4, 0, 0, 0};
 
-    std::vector<uint8_t> output;
-    output.reserve(level * 100000);
+    size_t written = 0;
     uint32_t combined_crc = 0;
     std::vector<uint32_t> ibwt_buf;
 
@@ -251,16 +268,12 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
         if (m0 != 0x3141 || m1 != 0x5926 || m2 != 0x5359) return 0;
 
         uint32_t block_crc = 0;
-        std::vector<uint8_t> block_out;
-        if (!decode_block(br, block_out, &block_crc, ibwt_buf)) return 0;
+        if (!decode_block(br, dst, dst_cap, written, &block_crc, ibwt_buf))
+            return 0;
         combined_crc = crc32_combine(combined_crc, block_crc);
-
-        for (uint8_t b : block_out) output.push_back(b);
     }
 
-    if (output.size() > dst_cap) return 0;
-    memcpy(dst, output.data(), output.size());
-    return output.size();
+    return written;
 }
 
 } // namespace orot::bzip2
