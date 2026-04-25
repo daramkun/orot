@@ -7,3 +7,4 @@
 | DEFLATE (LZ77 + Huffman) | [docs/impl/deflate.md](docs/impl/deflate.md) | ✅ |
 | LZ4 (block + frame) | [docs/impl/lz4.md](docs/impl/lz4.md) | ✅ |
 | LZW (variable-width) | [docs/impl/lzw.md](docs/impl/lzw.md) | ✅ |
+| LZMA/LZMA2 (range coding) | [docs/impl/lzma.md](docs/impl/lzma.md) | ✅ |

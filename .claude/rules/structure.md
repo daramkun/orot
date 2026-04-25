@@ -5,10 +5,10 @@
 ```
 orot/
 ├── include/orot/
-│   ├── deflate.h           # C API (whole-buffer, streaming, parallel)
+│   ├── deflate.h           # DEFLATE C API (whole-buffer, streaming, parallel) + C++ RAII 래퍼
 │   ├── deflate_types.h     # 에러코드, enum, allocator 인터페이스
-│   ├── deflate.h           # C++ RAII 래퍼
 │   ├── lz4.h               # LZ4 C API (block + frame)
+│   ├── lzw.h               # LZW C API
 │   └── lzma.h              # LZMA/LZMA2 C/C++ API
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
@@ -39,9 +39,10 @@ orot/
 │   │   ├── lzma2_compress.cpp      # LZMA2 청크 스트림 압축
 │   │   └── lzma2_decompress.cpp    # LZMA2 청크 스트림 압축해제
 │   ├── api/                # C API 진입점
-│   │   ├── c_api.cpp       # whole-buffer compress/decompress + 체크섬
+│   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
 │   │   ├── lz4_api.cpp     # LZ4 C API 진입점
+│   │   ├── lzw_api.cpp     # LZW C API 진입점
 │   │   └── lzma_api.cpp    # LZMA/LZMA2 C API 진입점
 │   ├── parallel/           # 멀티스레드 압축 (pigz 스타일)
 │   │   ├── thread_pool.{cpp,hpp}           # 고정 스레드 풀 실행기
