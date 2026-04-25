@@ -47,12 +47,17 @@ static void build_suffix_array(const uint8_t* block, uint32_t n,
         uint32_t cnt_size = (uint32_t)(max_rank + 2);
         cnt.assign(cnt_size, 0);
 
-        /* Pass 1: stable sort by second key rank[(i+gap)%n] */
-        for (uint32_t i = 0; i < n; ++i)
-            cnt[(uint32_t)rank[(sa[i] + gap) % n] + 1]++;
+        /* Pass 1: stable sort by second key rank[(sa[i]+gap) mod n]
+           sa[i] < n, gap < n => sum < 2n => conditional subtract avoids division */
+        for (uint32_t i = 0; i < n; ++i) {
+            uint32_t idx = sa[i] + gap; if (idx >= n) idx -= n;
+            cnt[(uint32_t)rank[idx] + 1]++;
+        }
         for (uint32_t i = 1; i < cnt_size; ++i) cnt[i] += cnt[i-1];
-        for (uint32_t i = 0; i < n; ++i)
-            work[cnt[(uint32_t)rank[(sa[i] + gap) % n]]++] = sa[i];
+        for (uint32_t i = 0; i < n; ++i) {
+            uint32_t idx = sa[i] + gap; if (idx >= n) idx -= n;
+            work[cnt[(uint32_t)rank[idx]]++] = sa[i];
+        }
 
         /* Pass 2: stable sort by first key rank[i] */
         cnt.assign(cnt_size, 0);
@@ -62,11 +67,12 @@ static void build_suffix_array(const uint8_t* block, uint32_t n,
         for (uint32_t i = 0; i < n; ++i)
             sa[cnt[(uint32_t)rank[work[i]]]++] = work[i];
 
-        /* Reassign ranks based on (rank[sa[i]], rank[(sa[i]+gap)%n]) pairs */
+        /* Reassign ranks based on (rank[sa[i]], rank[(sa[i]+gap) mod n]) pairs */
         rank_tmp[sa[0]] = 0;
         for (uint32_t i = 1; i < n; ++i) {
-            bool same = (rank[sa[i]]            == rank[sa[i-1]]) &&
-                        (rank[(sa[i]+gap)%n]    == rank[(sa[i-1]+gap)%n]);
+            uint32_t pi = sa[i]   + gap; if (pi >= n) pi -= n;
+            uint32_t qi = sa[i-1] + gap; if (qi >= n) qi -= n;
+            bool same = (rank[sa[i]] == rank[sa[i-1]]) && (rank[pi] == rank[qi]);
             rank_tmp[sa[i]] = rank_tmp[sa[i-1]] + (same ? 0 : 1);
         }
         for (uint32_t i = 0; i < n; ++i) rank[i] = rank_tmp[i];
