@@ -168,8 +168,12 @@ static bool decode_block(BitReader& br,
     uint32_t run_mul = 1;
 
     auto flush_run = [&]() {
-        for (uint32_t k = 0; k < run; ++k) mtf_out.push_back(0);
-        run = 0; run_mul = 1;
+        if (run > 0) {
+            size_t old_sz = mtf_out.size();
+            mtf_out.resize(old_sz + run);
+            memset(mtf_out.data() + old_sz, 0, run);
+            run = 0; run_mul = 1;
+        }
     };
 
     while (true) {
