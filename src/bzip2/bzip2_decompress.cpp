@@ -54,16 +54,49 @@ struct BitReader {
 
 static constexpr uint32_t BZ2_BLOCK_MAX = 900001;
 
+static inline void mtf_move_to_front(uint8_t* mtf_sym, uint8_t rank, uint8_t sym) {
+    switch (rank) {
+    case 0:
+        return;
+    case 1:
+        mtf_sym[1] = mtf_sym[0];
+        mtf_sym[0] = sym;
+        return;
+    case 2:
+        mtf_sym[2] = mtf_sym[1];
+        mtf_sym[1] = mtf_sym[0];
+        mtf_sym[0] = sym;
+        return;
+    case 3:
+        mtf_sym[3] = mtf_sym[2];
+        mtf_sym[2] = mtf_sym[1];
+        mtf_sym[1] = mtf_sym[0];
+        mtf_sym[0] = sym;
+        return;
+    case 4:
+        mtf_sym[4] = mtf_sym[3];
+        mtf_sym[3] = mtf_sym[2];
+        mtf_sym[2] = mtf_sym[1];
+        mtf_sym[1] = mtf_sym[0];
+        mtf_sym[0] = sym;
+        return;
+    default:
+        memmove(mtf_sym + 1, mtf_sym, rank);
+        mtf_sym[0] = sym;
+        return;
+    }
+}
+
 /*
- * decode_block: fused Huffman+MTF decode → BWT pack → inline BWT walk+RLE1+CRC.
+ * decode_block: fused Huffman+MTF decode → BWT pack → BWT walk+RLE1.
  *
  * Architecture (libbz2-inspired):
  *   Phase 1 — Huffman + MTF decode: decoded chars written to tt[] lower 8 bits,
  *              unzftab[] counts accumulated. No separate mtf_out buffer.
  *   Phase 2 — BWT pack: tt[cftab[char]] |= (i<<8). Char stays in low 8 bits.
- *   Phase 3 — Output walk: tt[tPos] gives (char | next<<8). CRC computed inline
- *              alongside RLE1 expansion — avoids a separate crc32_block pass over
- *              potentially-cold dst memory.
+ *   Phase 3 — Output walk: tt[tPos] gives (char | next<<8). CRC is verified once
+ *              per decoded block after reconstruction, letting the hot decode loop
+ *              keep memset-based run expansion branch-light.
  */
 static bool decode_block(BitReader& br,
                           uint8_t* dst, size_t dst_cap, size_t& written,
@@ -200,10 +233,7 @@ static bool decode_block(BitReader& br,
         uint8_t rank = (uint8_t)(sym - 1);
         if ((int)rank >= n_in_use) return false;
         uint8_t uc = mtf_sym[rank];
-        if (rank != 0) {
-            memmove(mtf_sym + 1, mtf_sym, rank);
-            mtf_sym[0] = uc;
-        }
+        mtf_move_to_front(mtf_sym, rank, uc);
 
         if (nblock >= BZ2_BLOCK_MAX) return false;
         tt_data[nblock++] = (uint32_t)uc;
@@ -225,10 +255,9 @@ static bool decode_block(BitReader& br,
         cftab[uc]++;
     }
 
-    /* ── Phase 3: BWT walk + RLE1 + CRC — all inline (no re-read of dst) ───── */
+    /* ── Phase 3: BWT walk + RLE1 ───────────────────────────────────────────── */
 
     /* Restore all hot state to locals (encourages register allocation) */
-    uint32_t c_crc    = 0xFFFFFFFFu;
     size_t   c_outpos = written;
     uint8_t  c_run_ch = 0;
     int      c_run_cnt = 0;
@@ -243,7 +272,6 @@ static bool decode_block(BitReader& br,
 
         if (c_outpos >= dst_cap) return false;
         dst[c_outpos++] = c;
-        c_crc = (c_crc << 8) ^ detail::CRC32_TABLE[((c_crc >> 24) ^ c) & 0xFF];
 
         if (c == c_run_ch) {
             c_run_cnt++;
@@ -257,9 +285,6 @@ static bool decode_block(BitReader& br,
 
                 if (c_outpos + cnt > dst_cap) return false;
                 memset(dst + c_outpos, c_run_ch, cnt);
-                /* Update CRC for the expanded run */
-                for (uint32_t r = 0; r < cnt; r++)
-                    c_crc = (c_crc << 8) ^ detail::CRC32_TABLE[((c_crc >> 24) ^ c_run_ch) & 0xFF];
                 c_outpos += cnt;
                 c_run_cnt = 0;
             }
@@ -269,7 +294,7 @@ static bool decode_block(BitReader& br,
         }
     }
 
-    c_crc ^= 0xFFFFFFFFu;
+    uint32_t c_crc = crc32_block(dst + written, c_outpos - written);
     if (c_crc != *block_crc_out) return false;
     written = c_outpos;
     return true;
