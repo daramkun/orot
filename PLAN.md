@@ -15,12 +15,12 @@ Zstandard는 포맷 호환 압축 해제를 먼저 완성한 뒤, 검증 가능�
 
 ### 1단계: 골격 및 공개 API
 
-- [ ] `include/orot/zstd.h` 추가
-- [ ] `src/zstd/` 내부 모듈 구조 추가
-- [ ] `src/api/zstd_api.cpp` C API 진입점 추가
-- [ ] `CMakeLists.txt`, `tests/CMakeLists.txt`에 zstd 소스/테스트 연결
-- [ ] `orot_zstd_compress_bound`, `orot_zstd_compress`, `orot_zstd_decompress` 기본 시그니처 정의
-- [ ] `docs/impl/zstd.md` 초기 문서 추가
+- [x] `include/orot/zstd.h` 추가
+- [x] `src/zstd/` 내부 모듈 구조 추가
+- [x] `src/api/zstd_api.cpp` C API 진입점 추가
+- [x] `CMakeLists.txt`, `tests/CMakeLists.txt`에 zstd 소스/테스트 연결
+- [x] `orot_zstd_compress_bound`, `orot_zstd_compress`, `orot_zstd_decompress` 기본 시그니처 정의
+- [x] `docs/impl/zstd.md` 초기 문서 추가
 
 ### 2단계: Frame 및 Block 파서
 

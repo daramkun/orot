@@ -10,7 +10,8 @@ orot/
 │   ├── lz4.h               # LZ4 C API (block + frame)
 │   ├── lzw.h               # LZW C API
 │   ├── lzma.h              # LZMA/LZMA2 C/C++ API
-│   └── bzip2.h             # Bzip2 C/C++ API
+│   ├── bzip2.h             # Bzip2 C/C++ API
+│   └── zstd.h              # Zstandard C API (stage-1 skeleton)
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -46,13 +47,17 @@ orot/
 │   │   ├── bzip2_huffman.{cpp,hpp} # 다중 Huffman 테이블 + selector
 │   │   ├── bzip2_compress.{cpp,hpp}   # 5단계 압축 파이프라인
 │   │   └── bzip2_decompress.{cpp,hpp} # 5단계 압축해제 파이프라인
+│   ├── zstd/               # Zstandard 구현 (stage-1 skeleton)
+│   │   ├── zstd.hpp        # 내부 API, 상수, 모듈 경계
+│   │   └── zstd.cpp        # 기본 bound + 미구현 compress/decompress 반환
 │   ├── api/                # C API 진입점
 │   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
 │   │   ├── lz4_api.cpp     # LZ4 C API 진입점
 │   │   ├── lzw_api.cpp     # LZW C API 진입점
 │   │   ├── lzma_api.cpp    # LZMA/LZMA2 C API 진입점
-│   │   └── bzip2_api.cpp   # Bzip2 C API 진입점
+│   │   ├── bzip2_api.cpp   # Bzip2 C API 진입점
+│   │   └── zstd_api.cpp    # Zstandard C API 진입점
 │   ├── parallel/           # 멀티스레드 압축 (pigz 스타일)
 │   │   ├── thread_pool.{cpp,hpp}           # 고정 스레드 풀 실행기
 │   │   ├── parallel_compressor.{cpp,hpp}   # 블록 분할 + 병합 워커
@@ -86,7 +91,8 @@ orot/
 │   │   ├── test_lz4.cpp              # LZ4 block/frame 라운드트립 + 에러 경로
 │   │   ├── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
 │   │   ├── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
-│   │   └── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
+│   │   ├── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
+│   │   └── test_zstd.cpp             # Zstandard stage-1 API 계약
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
@@ -195,6 +201,11 @@ orot_bzip2_compress_bound()
 orot_bzip2_compress()
 orot_bzip2_compress_parallel()
 orot_bzip2_decompress()
+
+// Zstandard (zstd.h)
+orot_zstd_compress_bound()
+orot_zstd_compress()
+orot_zstd_decompress()
 ```
 
 ## C++ API

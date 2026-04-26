@@ -73,6 +73,11 @@ set(OROT_BZIP2_SOURCES
     src/api/bzip2_api.cpp
 )
 
+set(OROT_ZSTD_SOURCES
+    src/zstd/zstd.cpp
+    src/api/zstd_api.cpp
+)
+
 # ── SIMD object libraries (each with its own compile flags) ──────────────────
 set(OROT_DEFLATE_SIMD_OBJECTS "")
 
@@ -163,6 +168,7 @@ if(OROT_SHARED)
         ${OROT_LZW_SOURCES}
         ${OROT_LZMA_SOURCES}
         ${OROT_BZIP2_SOURCES}
+        ${OROT_ZSTD_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 else()
   add_library(orot STATIC ${OROT_DEFLATE_CORE_SOURCES}
@@ -170,6 +176,7 @@ else()
         ${OROT_LZW_SOURCES}
         ${OROT_LZMA_SOURCES}
         ${OROT_BZIP2_SOURCES}
+        ${OROT_ZSTD_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 endif()
 
@@ -194,6 +201,7 @@ target_compile_definitions(orot PRIVATE
     OROT_HAS_LZW
     OROT_HAS_LZMA
     OROT_HAS_BZIP2
+    OROT_HAS_ZSTD
 )
 
 deflate_set_compiler_flags(orot)

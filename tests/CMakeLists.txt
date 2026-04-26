@@ -38,6 +38,8 @@ add_unit_test(test_lzma unit/test_lzma.cpp)
 
 add_unit_test(test_bzip2 unit/test_bzip2.cpp)
 
+add_unit_test(test_zstd unit/test_zstd.cpp)
+
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
 if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can
