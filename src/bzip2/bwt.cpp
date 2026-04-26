@@ -303,11 +303,19 @@ void bwt_inverse(const uint8_t* in, uint8_t* out, uint32_t len,
     for (uint32_t i = 0; i < len; ++i)
         T[pos[in[i]]++] = i;
 
+    /* Pack character into upper 12 bits of T[]: T[j] = next_idx | (in[j] << 20)
+     * Max block = 900,000 < 2^20, so lower 20 bits hold the index safely.
+     * Halves random memory accesses in the walk (in[idx] + T[idx] → T[idx] only). */
+    for (uint32_t i = 0; i < len; ++i)
+        T[i] |= ((uint32_t)in[i] << 20);
+
     /* Walk T[] from T[primary_index] to reconstruct */
-    uint32_t idx = T[primary_index];
+    uint32_t idx = T[primary_index] & 0xFFFFF;
     for (uint32_t i = 0; i < len; ++i) {
-        out[i] = in[idx];
-        idx = T[idx];
+        uint32_t packed = T[idx];
+        __builtin_prefetch(&T[packed & 0xFFFFF], 0, 0);
+        out[i] = (uint8_t)(packed >> 20);
+        idx    = packed & 0xFFFFF;
     }
 }
 

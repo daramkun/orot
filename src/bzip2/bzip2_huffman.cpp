@@ -194,9 +194,26 @@ int HuffDecTable::decode_sym(uint64_t& buf, int& buf_bits,
             buf_bits -= e.len;
             return e.sym;
         }
+        /* Code is longer than HUFF_FAST_BITS. Consume the 10 bits already peeked
+         * and continue from l = HUFF_FAST_BITS+1, avoiding re-scanning bits 1..10. */
+        buf_bits -= HUFF_FAST_BITS;
+        uint32_t v = peek;
+        for (int l = HUFF_FAST_BITS + 1; l <= max_len; ++l) {
+            if (buf_bits == 0) {
+                if (src_pos >= src_size) return -1;
+                buf = (buf << 8) | src[src_pos++];
+                buf_bits = 8;
+            }
+            --buf_bits;
+            v = (v << 1) | (uint32_t)((buf >> buf_bits) & 1);
+            if (limit[l] == (uint32_t)-1) continue;
+            if (v <= limit[l])
+                return perm[offset[l] + (int)(v - base[l])];
+        }
+        return -1;
     }
 
-    /* Slow path: bit-by-bit for codes longer than HUFF_FAST_BITS, or if buf low */
+    /* Slow path: buf too low for fast lookup — read bit by bit from the start */
     uint32_t v = 0;
     for (int l = 1; l <= max_len; ++l) {
         if (buf_bits == 0) {

@@ -19,6 +19,21 @@ struct BitReader {
 
     /* Fill buf to at least 56 bits from src */
     void refill() {
+        if (buf_bits > 56) return;
+        /* Bulk path: load up to 8 source bytes at once (MSB-first via bswap) */
+        if (pos + 8 <= src_size) {
+            int slots = (64 - buf_bits) >> 3;  /* 1..8 bytes to add */
+            int shift = slots * 8;              /* 8..64 */
+            uint64_t chunk;
+            __builtin_memcpy(&chunk, src + pos, 8);
+            chunk = __builtin_bswap64(chunk);
+            /* shift < 64: make room in buf; shift == 64: buf was empty → overwrite */
+            buf = (shift < 64 ? buf << shift : 0) | (chunk >> (64 - shift));
+            pos += slots;
+            buf_bits += shift;
+            return;
+        }
+        /* Byte-by-byte fallback near end of stream */
         while (buf_bits <= 56 && pos < src_size) {
             buf = (buf << 8) | src[pos++];
             buf_bits += 8;
@@ -74,7 +89,8 @@ static bool rle1_decode(const uint8_t* in, uint32_t in_len,
 static bool decode_block(BitReader& br,
                           uint8_t* dst, size_t dst_cap, size_t& written,
                           uint32_t* block_crc_out,
-                          std::vector<uint32_t>& ibwt_buf)
+                          std::vector<uint32_t>& ibwt_buf,
+                          std::vector<uint8_t>& bwt_inv_buf)
 {
     /* Block CRC (32 bits) */
     uint32_t hi = br.read_bits(16);
@@ -131,7 +147,7 @@ static bool decode_block(BitReader& br,
                 if (pos >= (int)n_tables) return false;
             }
             uint8_t tbl = order[pos];
-            memmove(order + 1, order, pos);
+            for (int k = pos; k > 0; --k) order[k] = order[k - 1];
             order[0] = tbl;
             selectors[g] = tbl;
         }
@@ -218,12 +234,12 @@ static bool decode_block(BitReader& br,
     }
 
     /* BWT inverse */
-    std::vector<uint8_t> bwt_inv(mtf_len);
-    bwt_inverse(mtf_out.data(), bwt_inv.data(), mtf_len, primary, ibwt_buf);
+    bwt_inv_buf.resize(mtf_len);
+    bwt_inverse(mtf_out.data(), bwt_inv_buf.data(), mtf_len, primary, ibwt_buf);
 
     /* RLE1 decode directly into dst */
     size_t rle1_len = 0;
-    if (!rle1_decode(bwt_inv.data(), mtf_len, dst + written,
+    if (!rle1_decode(bwt_inv_buf.data(), mtf_len, dst + written,
                      dst_cap - written, rle1_len))
         return false;
 
@@ -252,6 +268,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
     size_t written = 0;
     uint32_t combined_crc = 0;
     std::vector<uint32_t> ibwt_buf;
+    std::vector<uint8_t>  bwt_inv_buf;
 
     while (true) {
         uint32_t m0 = br.read_bits(16);
@@ -271,7 +288,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
         if (m0 != 0x3141 || m1 != 0x5926 || m2 != 0x5359) return 0;
 
         uint32_t block_crc = 0;
-        if (!decode_block(br, dst, dst_cap, written, &block_crc, ibwt_buf))
+        if (!decode_block(br, dst, dst_cap, written, &block_crc, ibwt_buf, bwt_inv_buf))
             return 0;
         combined_crc = crc32_combine(combined_crc, block_crc);
     }
