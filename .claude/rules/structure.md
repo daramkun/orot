@@ -107,7 +107,8 @@ orot/
 │   │   ├── bench_zstd.cpp            # Zstandard 단일 라이브러리 벤치 (→ bench_zstd)
 │   │   └── bench_zstd_compare.cpp    # Zstandard 비교 벤치 (libzstd) (→ bench_zstd_compare)
 │   ├── compat/
-│   │   └── test_compat.cpp      # 교차 라이브러리 호환성 (126 케이스)
+│   │   ├── test_compat.cpp       # DEFLATE 교차 라이브러리 호환성 (zlib/libdeflate, 126 케이스)
+│   │   └── test_codec_compat.cpp # LZ4/LZMA/LZMA2/Bzip2/Zstandard 교차 라이브러리 호환성
 │   └── fuzz/
 │       ├── fuzz_roundtrip.cpp   # libfuzzer compress+decompress
 │       ├── fuzz_decompress.cpp  # libfuzzer decompress only
