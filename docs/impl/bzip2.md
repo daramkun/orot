@@ -154,6 +154,7 @@ cmake --build build --target bench_bzip2_compare
 | SA-IS O(n) BWT (적응형) | 압축 2-3x 향상 (구조적 데이터) |
 | BWT counting sort `%n` → 조건부 빼기 | BWT ~10-20% 향상 |
 | Huffman fast decode (10-bit 룩업 테이블) | 압축해제 1.3-2.9x (random) |
+| Huffman fast table `memset` 초기화 | 반복 블록의 decode table 빌드 고정 비용 감소 |
 | MTF rank==0 fast path | 소폭 전체 향상 |
 | MTF rank 1~8 수동 이동 | 구조적 데이터에서 작은 `memmove` 호출 감소 |
 | RLE1 decode memset | zeros 해제 소폭 향상 |

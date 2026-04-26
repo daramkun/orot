@@ -165,8 +165,7 @@ void HuffDecTable::build_from_lengths(const uint8_t* lengths, int size) {
     }
 
     /* Build fast lookup table for codes with length <= HUFF_FAST_BITS */
-    for (int i = 0; i < HUFF_FAST_SIZE; ++i)
-        fast_table[i] = { -1, 0 };
+    std::memset(fast_table, 0xFF, sizeof(fast_table));
 
     int fast_max = std::min(max_len, HUFF_FAST_BITS);
     for (int l = 1; l <= fast_max; ++l) {
