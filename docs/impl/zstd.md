@@ -30,6 +30,10 @@
 | incompressible data raw block fallback | ✅ |
 | 128 KiB 단위 chunking | ✅ |
 | `orot_zstd_compress` 라운드트립 테스트 | ✅ |
+| raw content dictionary API 및 dictionary id/header 처리 | ✅ |
+| dictionary history 기반 압축 해제 | ✅ |
+| buffered streaming compress/decompress API | ✅ |
+| zstd 전용 fuzz target 및 벤치마크 | ✅ |
 
 ---
 
@@ -39,7 +43,7 @@
 
 compressed block은 FSE entropy table과 reverse bitstream으로 sequence code를 복원하고, literal section은 raw/RLE/Huffman 형태를 파싱한다. repeat mode를 위해 frame 내 이전 FSE/Huffman table 상태와 repeated offset 상태를 유지한다.
 
-압축기는 레벨 1-9를 검증한 뒤 128 KiB block 단위로 frame을 생성한다. block 전체가 같은 바이트로 구성된 경우 RLE block을 쓰고, 그 외 입력은 raw block으로 fallback한다. 이 경로는 압축률보다 포맷 호환성과 라운드트립 안정성을 우선한다.
+압축기는 레벨 1-9를 검증한 뒤 128 KiB block 단위로 frame을 생성한다. block 전체가 같은 바이트로 구성된 경우 RLE block을 쓰고, 그 외 입력은 raw block으로 fallback한다. dictionary API에서는 raw content dictionary와 dictionary id를 받아 frame header에 id를 기록할 수 있지만, 현재 encoder는 dictionary match를 entropy-compressed block으로 내보내지 않는다. 이 경로는 압축률보다 포맷 호환성과 라운드트립 안정성을 우선한다.
 
 ## Frame/Header 처리
 
@@ -51,7 +55,7 @@ compressed block은 FSE entropy table과 reverse bitstream으로 sequence code�
 | Frame Header Descriptor | FCS, single segment, checksum, dictionary id 플래그 파싱 |
 | Reserved/unused bits | 설정된 경우 malformed frame으로 거부 |
 | Window Descriptor | non-single-segment frame에서 window size 계산 |
-| Dictionary ID | 0/1/2/4바이트 dictionary id 파싱 |
+| Dictionary ID | 0/1/2/4바이트 dictionary id 파싱, dict API에서 기대 id 검증 |
 | Frame Content Size | 1/2/4/8바이트 content size 파싱, 2바이트 form은 +256 적용 |
 
 content size가 제공된 frame은 출력 크기가 정확히 일치해야 성공한다.
@@ -69,9 +73,35 @@ block header는 3바이트 little-endian 값으로 파싱한다.
 
 block size는 Zstandard block 최대 크기인 128 KiB를 넘으면 거부한다.
 
+## Dictionary
+
+`orot_zstd_decompress_dict`는 raw content dictionary를 현재 frame 출력 앞쪽의 history prefix로 배치한다. compressed block sequence의 offset 검증과 match copy는 이 prefix까지 포함한 window를 기준으로 수행하므로, 외부 zstd 산출물이 raw dictionary 영역을 참조하는 경우도 처리할 수 있다. checksum은 dictionary를 제외한 decoded content에 대해서만 계산한다.
+
+dictionary id가 있는 frame은 기본 `orot_zstd_decompress`에서 거부된다. dict API에서는 dictionary가 제공되어야 하며, `expected_dict_id`가 0이 아니면 frame header의 dictionary id와 일치해야 한다. `expected_dict_id == 0`은 dictionary가 제공된 상태에서 임의의 non-zero id를 허용한다.
+
+`orot_zstd_compress_dict`는 dictionary id를 frame header에 기록한다. 현재 block encoder는 raw/RLE fallback만 생성하므로 dictionary content는 압축률 개선에는 사용하지 않는다. trained dictionary entropy tables도 아직 지원하지 않는다.
+
+## Streaming
+
+streaming API는 C opaque context로 제공한다.
+
+```c
+orot_zstd_cstream* orot_zstd_compress_stream_new(int level);
+int orot_zstd_compress_stream_set_dict(orot_zstd_cstream*, const void*, int, unsigned);
+int orot_zstd_compress_stream_update(orot_zstd_cstream*, const void*, int);
+int orot_zstd_compress_stream_finish(orot_zstd_cstream*, void*, int);
+
+orot_zstd_dstream* orot_zstd_decompress_stream_new(void);
+int orot_zstd_decompress_stream_set_dict(orot_zstd_dstream*, const void*, int, unsigned);
+int orot_zstd_decompress_stream_update(orot_zstd_dstream*, const void*, int);
+int orot_zstd_decompress_stream_finish(orot_zstd_dstream*, void*, int);
+```
+
+현재 구현은 입력 chunk를 context 내부에 누적하고 `finish`에서 기존 whole-buffer codec을 호출한다. API 표면은 streaming 사용자를 위한 상태ful 인터페이스를 제공하지만, incremental output production은 후속 최적화 범위로 남겨둔다.
+
 ## Compressor
 
-`orot_zstd_compress`는 다음 정책으로 frame을 생성한다.
+`orot_zstd_compress`와 `orot_zstd_compress_dict`는 다음 정책으로 frame을 생성한다.
 
 | 항목 | 처리 |
 |------|------|
@@ -81,7 +111,9 @@ block size는 Zstandard block 최대 크기인 128 KiB를 넘으면 거부한다
 | RLE 감지 | block 전체가 동일 byte일 때 RLE block 출력 |
 | Raw fallback | 그 외 모든 입력은 raw block 출력 |
 | Level | 1-9 범위 검증 및 내부 정책 매핑 |
-| Dictionary/checksum | compressor 경로에서는 아직 생성하지 않음 |
+| Dictionary ID | dict API에서 1/2/4바이트 id header 생성 |
+| Dictionary content | 현재 raw/RLE block encoder에서는 압축 match에 사용하지 않음 |
+| Checksum | compressor 경로에서는 아직 생성하지 않음 |
 
 현재 encoder는 entropy-compressed block을 생성하지 않는다. 압축 해제기의 entropy decoder와 sequence executor는 libzstd 샘플 검증에 사용되며, compressor는 raw/RLE fallback으로 포맷 호환 출력을 보장한다.
 
@@ -108,6 +140,9 @@ src/zstd/
 └── zstd.cpp               # frame/block parser + raw/RLE compressor + compressed block decompress
 src/api/zstd_api.cpp       # C API 진입점
 tests/unit/test_zstd.cpp   # frame/block/compressed sample + 에러 경로 테스트
+tests/bench/bench_zstd.cpp # OROT zstd 벤치마크
+tests/bench/bench_zstd_compare.cpp # libzstd 비교 벤치마크
+tests/fuzz/fuzz_zstd_decompress.cpp # zstd frame fuzz target
 ```
 
 ## C API
@@ -121,6 +156,15 @@ int orot_zstd_compress(const void* src, int src_size,
 
 int orot_zstd_decompress(const void* src, int src_size,
                          void*       dst, int dst_cap);
+
+int orot_zstd_compress_dict(const void* src, int src_size,
+                            const void* dict, int dict_size, unsigned dict_id,
+                            void*       dst, int dst_cap,
+                            int         level);
+
+int orot_zstd_decompress_dict(const void* src, int src_size,
+                              const void* dict, int dict_size, unsigned expected_dict_id,
+                              void*       dst, int dst_cap);
 ```
 
 반환 규칙은 기존 orot 알고리즘 API와 동일하게 유지한다.
@@ -132,7 +176,7 @@ int orot_zstd_decompress(const void* src, int src_size,
 
 ## 남은 작업
 
-압축 해제는 기본 libzstd 샘플과 경계 조건을 통과한다. 압축기는 현재 raw/RLE block을 생성하므로, 향후 compressed-block encoder에서 Huffman/FSE table 선택, sequence bitstream 작성, lazy/hash-chain match finder를 실제 압축률 개선 경로에 연결할 필요가 있다. 독립 FSE/Huffman 단위 테스트와 더 다양한 Huffman literal 샘플, 다중 block/window 회귀 테스트도 추가 검증 항목이다.
+압축 해제는 기본 libzstd 샘플과 경계 조건을 통과한다. 압축기는 현재 raw/RLE block을 생성하므로, 향후 compressed-block encoder에서 Huffman/FSE table 선택, sequence bitstream 작성, lazy/hash-chain match finder와 dictionary match를 실제 압축률 개선 경로에 연결할 필요가 있다. 독립 FSE/Huffman 단위 테스트와 더 다양한 Huffman literal 샘플, 다중 block/window 회귀 테스트도 추가 검증 항목이다.
 
 ## 빌드 및 검증
 
@@ -140,4 +184,14 @@ int orot_zstd_decompress(const void* src, int src_size,
 cmake -B build -DOROT_TESTS=ON
 cmake --build build -j
 ./build/tests/test_zstd
+ctest --test-dir build --output-on-failure
+```
+
+벤치마크:
+
+```bash
+cmake -B build -DOROT_BENCHMARK=ON
+cmake --build build -j
+./build/tests/bench_zstd
+./build/tests/bench_zstd_compare
 ```

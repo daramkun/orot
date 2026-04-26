@@ -8,10 +8,14 @@ C++20 무손실 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC
   - C API (whole-buffer, streaming, parallel) + C++ RAII 래퍼
   - 압축 레벨 0–12 (L0=store, L1=fast, L6=default, L9=better, L12=max)
   - 자세한 내용: [DEFLATE 빠른 시작](docs/DEFLATE_QUICK_START.md) | [상세 가이드](docs/DEFLATE_TESTING.md) | [검증 보고서](docs/DEFLATE_VALIDATION_REPORT.md)
-- **LZ4 지원 (선택):** 빠른 압축/해제
+- **LZ4 지원:** 빠른 압축/해제
   - Block 및 Frame 포맷 지원
   - 압축 레벨 1–9
   - 자세한 내용: [LZ4 빠른 시작](docs/LZ4_QUICK_START.md) | [상세 가이드](docs/LZ4_TESTING.md) | [검증 보고서](docs/LZ4_VALIDATION_REPORT.md)
+- **LZW/LZMA/Bzip2/Zstandard 지원:** whole-buffer 압축/해제
+  - Zstandard frame raw/RLE 압축, raw/RLE/compressed block 해제
+  - Zstandard raw content dictionary API 및 buffered streaming API
+  - 구현 상세: [Zstandard 구현 문서](docs/impl/zstd.md)
 - SIMD 가속: SSE2 / SSE4.2 / AVX2 (x86), NEON / CRC32 (ARM)
 - 멀티스레드 압축 (pigz 스타일)
 - 커스텀 allocator 지원
@@ -20,7 +24,7 @@ C++20 무손실 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC
 
 - CMake 3.20+
 - C++20 컴파일러 (GCC 10+, Clang 12+, MSVC 2022+)
-- (비교 벤치마크/호환성 테스트용) zlib, libdeflate
+- (비교 벤치마크/호환성 테스트용) zlib, libdeflate, liblz4, liblzma, libbz2, libzstd
 
 ## 빌드
 
@@ -56,13 +60,13 @@ cmake --install build --prefix /usr/local
 | `OROT_AS_PARALLEL` | ON | 병렬 압축 (pigz 스타일) |
 | `OROT_TESTS` | OFF | 유닛 테스트 빌드 |
 | `OROT_BENCHMARK` | OFF | 단일 라이브러리 벤치마크 |
-| `OROT_BENCHMARK_COMPARE` | OFF | zlib/libdeflate 비교 벤치마크 |
+| `OROT_BENCHMARK_COMPARE` | OFF | zlib/libdeflate/liblz4/liblzma/libbz2/libzstd 비교 벤치마크 |
 | `OROT_TESTS` | OFF | 교차 라이브러리 호환성 테스트 |
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
 | `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
-| `OROT_BENCHMARK` | OFF | LZ4 단일 라이브러리 벤치마크 |
-| `OROT_BENCHMARK_COMPARE` | OFF | liblz4 비교 벤치마크 |
+| `OROT_BENCHMARK` | OFF | 알고리즘별 단일 라이브러리 벤치마크 |
+| `OROT_BENCHMARK_COMPARE` | OFF | 알고리즘별 외부 라이브러리 비교 벤치마크 |
 
 ## 테스트
 
@@ -143,6 +147,25 @@ cmake --build build -j$(nproc)
 
 자세한 가이드: [LZ4 테스트 완전 가이드](docs/LZ4_TESTING.md)
 
+### Zstandard 테스트
+
+#### 빌드
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOROT_TESTS=ON
+cmake --build build -j$(nproc)
+```
+
+#### 실행
+```bash
+./build/tests/test_zstd
+ctest --test-dir build -R test_zstd --output-on-failure
+```
+
+#### 테스트 항목
+| 테스트 | 내용 |
+|--------|------|
+| `test_zstd` | frame/block 파싱, compressed block 샘플, dictionary API, streaming API, 에러 경로 |
+
 ## 벤치마크
 
 ### DEFLATE 성능 벤치마크
@@ -204,6 +227,26 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DOROT_BENCHMARK_COMPARE=ON
 cmake --build build -j$(nproc)
 ./build/tests/bench_lz4_compare [iterations]
+```
+
+### Zstandard 성능 벤치마크
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DOROT_TESTS=ON \
+      -DOROT_BENCHMARK=ON
+cmake --build build -j$(nproc)
+./build/tests/bench_zstd [iterations]
+```
+
+### Zstandard 비교 벤치마크 (libzstd와 비교)
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DOROT_TESTS=ON \
+      -DOROT_BENCHMARK_COMPARE=ON
+cmake --build build -j$(nproc)
+./build/tests/bench_zstd_compare [iterations]
 ```
 
 ## CMake 프로젝트에서 사용

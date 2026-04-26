@@ -16,8 +16,21 @@ int zstd_compress(
     uint8_t* dst, int dst_cap,
     int level) noexcept;
 
+int zstd_compress_dict(
+    const uint8_t* src, int src_len,
+    const uint8_t* dict, int dict_len,
+    uint32_t dict_id,
+    uint8_t* dst, int dst_cap,
+    int level) noexcept;
+
 int zstd_decompress(
     const uint8_t* src, int src_len,
+    uint8_t* dst, int dst_cap) noexcept;
+
+int zstd_decompress_dict(
+    const uint8_t* src, int src_len,
+    const uint8_t* dict, int dict_len,
+    uint32_t expected_dict_id,
     uint8_t* dst, int dst_cap) noexcept;
 
 } } /* namespace orot::zstd */

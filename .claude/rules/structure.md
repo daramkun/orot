@@ -11,7 +11,7 @@ orot/
 │   ├── lzw.h               # LZW C API
 │   ├── lzma.h              # LZMA/LZMA2 C/C++ API
 │   ├── bzip2.h             # Bzip2 C/C++ API
-│   └── zstd.h              # Zstandard C API
+│   └── zstd.h              # Zstandard C API (whole-buffer, dictionary, buffered streaming)
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -94,7 +94,7 @@ orot/
 │   │   ├── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
 │   │   ├── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
 │   │   ├── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
-│   │   └── test_zstd.cpp             # Zstandard frame/block/compressed sample + 에러 경로
+│   │   └── test_zstd.cpp             # Zstandard frame/block/compressed sample + dictionary/streaming + 에러 경로
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
@@ -103,12 +103,15 @@ orot/
 │   │   ├── bench_lzma.cpp            # LZMA 단일 라이브러리 벤치 (→ bench_lzma)
 │   │   ├── bench_lzma_compare.cpp    # LZMA 비교 벤치 (liblzma) (→ bench_lzma_compare)
 │   │   ├── bench_bzip2.cpp           # Bzip2 단일 라이브러리 벤치 (→ bench_bzip2)
-│   │   └── bench_bzip2_compare.cpp   # Bzip2 비교 벤치 (libbz2) (→ bench_bzip2_compare)
+│   │   ├── bench_bzip2_compare.cpp   # Bzip2 비교 벤치 (libbz2) (→ bench_bzip2_compare)
+│   │   ├── bench_zstd.cpp            # Zstandard 단일 라이브러리 벤치 (→ bench_zstd)
+│   │   └── bench_zstd_compare.cpp    # Zstandard 비교 벤치 (libzstd) (→ bench_zstd_compare)
 │   ├── compat/
 │   │   └── test_compat.cpp      # 교차 라이브러리 호환성 (126 케이스)
 │   └── fuzz/
 │       ├── fuzz_roundtrip.cpp   # libfuzzer compress+decompress
-│       └── fuzz_decompress.cpp  # libfuzzer decompress only
+│       ├── fuzz_decompress.cpp  # libfuzzer decompress only
+│       └── fuzz_zstd_decompress.cpp # libfuzzer Zstandard frame decompress only
 ├── cmake/
 │   ├── DetectSIMD.cmake      # CPU 기능 프로빙
 │   ├── CompilerFlags.cmake   # LTO, 경고, 최적화
@@ -208,6 +211,12 @@ orot_bzip2_decompress()
 orot_zstd_compress_bound()
 orot_zstd_compress()
 orot_zstd_decompress()
+orot_zstd_compress_dict()
+orot_zstd_decompress_dict()
+orot_zstd_compress_stream_new/free()
+orot_zstd_compress_stream_set_dict/update/finish()
+orot_zstd_decompress_stream_new/free()
+orot_zstd_decompress_stream_set_dict/update/finish()
 ```
 
 ## C++ API

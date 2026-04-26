@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <climits>
 #include <cstring>
+#include <vector>
 
 namespace orot { namespace zstd {
 
@@ -139,24 +140,55 @@ static CompressConfig config_for_level(int level) noexcept {
     return cfg;
 }
 
-static int frame_header_size_for_content(int src_len) noexcept {
-    if (src_len < 0) return -1;
-    if (src_len <= 255) return 4 + 1 + 1;
-    if (src_len <= 65791) return 4 + 1 + 2;
-    return 4 + 1 + 4;
+static int dict_id_size(uint32_t dict_id) noexcept {
+    if (dict_id == 0u) return 0;
+    if (dict_id <= 0xFFu) return 1;
+    if (dict_id <= 0xFFFFu) return 2;
+    return 4;
 }
 
-static void write_frame_header(uint8_t*& p, int src_len) noexcept {
+static uint8_t dict_id_flag(uint32_t dict_id) noexcept {
+    const int size = dict_id_size(dict_id);
+    if (size == 1) return 1u;
+    if (size == 2) return 2u;
+    if (size == 4) return 3u;
+    return 0u;
+}
+
+static void write_dict_id(uint8_t*& p, uint32_t dict_id) noexcept {
+    const int size = dict_id_size(dict_id);
+    if (size == 1) {
+        *p++ = static_cast<uint8_t>(dict_id);
+    } else if (size == 2) {
+        write_le16(p, dict_id);
+    } else if (size == 4) {
+        write_le32(p, dict_id);
+    }
+}
+
+static int frame_header_size_for_content(int src_len, uint32_t dict_id = 0) noexcept {
+    if (src_len < 0) return -1;
+    const int dict_bytes = dict_id_size(dict_id);
+    if (src_len <= 255) return 4 + 1 + dict_bytes + 1;
+    if (src_len <= 65791) return 4 + 1 + dict_bytes + 2;
+    return 4 + 1 + dict_bytes + 4;
+}
+
+static void write_frame_header(uint8_t*& p, int src_len, uint32_t dict_id = 0) noexcept {
     write_le32(p, ZSTD_MAGIC);
+    const uint8_t did_flag = dict_id_flag(dict_id);
 
     if (src_len <= 255) {
-        *p++ = 0x20u; /* single segment, 1-byte frame content size */
+        *p++ = static_cast<uint8_t>(0x20u | did_flag); /* single segment, 1-byte FCS */
+        write_dict_id(p, dict_id);
         *p++ = static_cast<uint8_t>(src_len);
     } else if (src_len <= 65791) {
-        *p++ = 0x60u; /* single segment, 2-byte frame content size */
+        *p++ = static_cast<uint8_t>(0x60u | did_flag); /* single segment, 2-byte FCS */
+        write_dict_id(p, dict_id);
         write_le16(p, static_cast<uint32_t>(src_len - 256));
     } else {
-        *p++ = 0xA0u; /* single segment, 4-byte frame content size */
+        *p++ = static_cast<uint8_t>(0xA0u | did_flag); /* single segment, 4-byte FCS */
+        write_dict_id(p, dict_id);
         write_le32(p, static_cast<uint32_t>(src_len));
     }
 }
@@ -654,14 +686,18 @@ int zstd_compress_bound(int src_len) noexcept {
     return src_len + overhead;
 }
 
-int zstd_compress(const uint8_t* src, int src_len,
-                  uint8_t* dst, int dst_cap, int level) noexcept {
+int zstd_compress_dict(const uint8_t* src, int src_len,
+                       const uint8_t* dict, int dict_len,
+                       uint32_t dict_id,
+                       uint8_t* dst, int dst_cap, int level) noexcept {
     if (src_len < 0 || dst_cap < 0) return -1;
     if ((src_len > 0 && src == nullptr) || (dst_cap > 0 && dst == nullptr)) return -1;
+    if (dict_len < 0) return -1;
+    if (dict_len > 0 && dict == nullptr) return -1;
     if (dst == nullptr) return -1;
     if (level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL) return -1;
 
-    const int header_size = frame_header_size_for_content(src_len);
+    const int header_size = frame_header_size_for_content(src_len, dict_id);
     if (header_size < 0) return -1;
     if (dst_cap < header_size + 3) return -2;
 
@@ -673,7 +709,10 @@ int zstd_compress(const uint8_t* src, int src_len,
     uint8_t* out = dst;
     uint8_t* const end = dst + dst_cap;
 
-    write_frame_header(out, src_len);
+    (void)dict;
+    (void)dict_len;
+
+    write_frame_header(out, src_len, dict_id);
 
     if (src_len == 0) {
         const int rc = write_raw_block(in, 0, true, out, end);
@@ -701,15 +740,24 @@ int zstd_compress(const uint8_t* src, int src_len,
     return static_cast<int>(out - dst);
 }
 
-int zstd_decompress(const uint8_t* src, int src_len,
-                    uint8_t* dst, int dst_cap) noexcept {
+int zstd_compress(const uint8_t* src, int src_len,
+                  uint8_t* dst, int dst_cap, int level) noexcept {
+    return zstd_compress_dict(src, src_len, nullptr, 0, 0u, dst, dst_cap, level);
+}
+
+int zstd_decompress_dict(const uint8_t* src, int src_len,
+                         const uint8_t* dict, int dict_len,
+                         uint32_t expected_dict_id,
+                         uint8_t* dst, int dst_cap) noexcept {
     if (src_len < 0 || dst_cap < 0) return -1;
     if ((src_len > 0 && src == nullptr) || (dst_cap > 0 && dst == nullptr)) return -1;
+    if (dict_len < 0) return -1;
+    if (dict_len > 0 && dict == nullptr) return -1;
 
     const uint8_t* p            = src;
     const uint8_t* const end    = src + src_len;
     uint8_t empty_output        = 0;
-    uint8_t* const dst_base     = (dst != nullptr) ? dst : &empty_output;
+    uint8_t* const user_dst     = (dst != nullptr) ? dst : &empty_output;
 
     /* Skip skippable frames (magic 0x184D2A50..0x184D2A5F) */
     while (p + 8 <= end) {
@@ -732,12 +780,31 @@ int zstd_decompress(const uint8_t* src, int src_len,
     FrameHeader header;
     if (!parse_frame_header(p, end, header)) return -1;
 
-    /* Dictionary frames are not supported */
-    if (header.dict_id != 0u) return -1;
+    if (header.dict_id != 0u) {
+        if (dict_len <= 0) return -1;
+        if (expected_dict_id != 0u && expected_dict_id != header.dict_id) return -1;
+    } else if (expected_dict_id != 0u) {
+        return -1;
+    }
+
+    int history_len = dict_len;
+    if (history_len > ZSTD_BLOCK_MAX_SIZE) history_len = ZSTD_BLOCK_MAX_SIZE;
+    uint8_t* output_base = user_dst;
+    uint8_t* history_base = user_dst;
+    std::vector<uint8_t> history_storage;
+    if (history_len > 0) {
+        if (dst_cap > INT_MAX - history_len) return -1;
+        history_storage.resize(static_cast<size_t>(history_len + dst_cap));
+        std::memcpy(history_storage.data(),
+                    dict + (dict_len - history_len),
+                    static_cast<size_t>(history_len));
+        history_base = history_storage.data();
+        output_base = history_storage.data() + history_len;
+    }
 
     BlockState bs;
-    uint8_t* out           = dst_base;
-    int      dst_written   = 0;
+    uint8_t* out           = output_base;
+    int      dst_written   = history_len;
     uint64_t produced_total = 0;
     bool     last_block    = false;
 
@@ -760,18 +827,18 @@ int zstd_decompress(const uint8_t* src, int src_len,
 
         if (block_type == 0) {
             /* Raw block */
-            if (dst_cap - dst_written < static_cast<int>(block_size)) return -2;
+            if (dst_cap - static_cast<int>(produced_total) < static_cast<int>(block_size)) return -2;
             if (block_size > 0) {
-                std::memcpy(out + dst_written, p, block_size);
+                std::memcpy(out + static_cast<int>(produced_total), p, block_size);
             }
             block_produced = static_cast<int>(block_size);
             p += block_size;
         } else if (block_type == 1) {
             /* RLE block */
             if (p >= end) return -1;
-            if (dst_cap - dst_written < static_cast<int>(block_size)) return -2;
+            if (dst_cap - static_cast<int>(produced_total) < static_cast<int>(block_size)) return -2;
             if (block_size > 0) {
-                std::memset(out + dst_written, *p, block_size);
+                std::memset(out + static_cast<int>(produced_total), *p, block_size);
             }
             block_produced = static_cast<int>(block_size);
             ++p;
@@ -779,7 +846,8 @@ int zstd_decompress(const uint8_t* src, int src_len,
             /* Compressed block */
             block_produced = decode_compressed_block(
                 p, static_cast<int>(block_size),
-                out, dst_written, dst_cap, bs);
+                history_base, dst_written,
+                history_len + dst_cap, bs);
             if (block_produced < 0) return block_produced;
             p += block_size;
         } else {
@@ -799,12 +867,20 @@ int zstd_decompress(const uint8_t* src, int src_len,
         if (p + 4 > end) return -1;
         const uint32_t expected = read_le32(p); p += 4;
         const uint32_t actual = static_cast<uint32_t>(
-            xxh64(dst_base, static_cast<size_t>(produced_total)) & 0xFFFFFFFFu);
+            xxh64(output_base, static_cast<size_t>(produced_total)) & 0xFFFFFFFFu);
         if (actual != expected) return -3;
     }
 
     if (p != end) return -1;
+    if (history_len > 0 && produced_total > 0) {
+        std::memcpy(user_dst, output_base, static_cast<size_t>(produced_total));
+    }
     return static_cast<int>(produced_total);
+}
+
+int zstd_decompress(const uint8_t* src, int src_len,
+                    uint8_t* dst, int dst_cap) noexcept {
+    return zstd_decompress_dict(src, src_len, nullptr, 0, 0u, dst, dst_cap);
 }
 
 } } /* namespace orot::zstd */

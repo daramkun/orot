@@ -150,6 +150,44 @@ static void expect_roundtrip(
     }
 }
 
+static void expect_dict_roundtrip(
+    const std::vector<uint8_t>& dict,
+    const std::vector<uint8_t>& input,
+    unsigned dict_id,
+    const char* label)
+{
+    const int bound = orot_zstd_compress_bound(static_cast<int>(input.size())) + 4;
+    std::vector<uint8_t> compressed(static_cast<size_t>(bound), 0);
+    const int compressed_size = orot_zstd_compress_dict(
+        input.data(), static_cast<int>(input.size()),
+        dict.data(), static_cast<int>(dict.size()), dict_id,
+        compressed.data(), static_cast<int>(compressed.size()),
+        3);
+    CHECK(compressed_size > 0, label);
+    if (compressed_size <= 0) return;
+
+    std::vector<uint8_t> out(input.size() + 16, 0);
+    int rc = orot_zstd_decompress_dict(
+        compressed.data(), compressed_size,
+        dict.data(), static_cast<int>(dict.size()), dict_id,
+        out.data(), static_cast<int>(out.size()));
+    CHECK_EQ(rc, static_cast<int>(input.size()), label);
+    if (rc == static_cast<int>(input.size()) && !input.empty()) {
+        CHECK(std::memcmp(out.data(), input.data(), input.size()) == 0, label);
+    }
+
+    rc = orot_zstd_decompress(
+        compressed.data(), compressed_size,
+        out.data(), static_cast<int>(out.size()));
+    CHECK_EQ(rc, -1, "dictionary id frame rejected without dictionary");
+
+    rc = orot_zstd_decompress_dict(
+        compressed.data(), compressed_size,
+        dict.data(), static_cast<int>(dict.size()), dict_id + 1u,
+        out.data(), static_cast<int>(out.size()));
+    CHECK_EQ(rc, -1, "dictionary id mismatch rejected");
+}
+
 int main() {
     CHECK(orot_zstd_compress_bound(0) >= 0, "empty bound is valid");
     CHECK(orot_zstd_compress_bound(1024) >= 1024, "bound covers input size");
@@ -158,6 +196,11 @@ int main() {
     expect_roundtrip({}, 1, "empty input roundtrip");
     expect_roundtrip({ 'z', 's', 't', 'd' }, 1, "small raw roundtrip");
     expect_roundtrip(std::vector<uint8_t>(1024, 'Q'), 9, "RLE roundtrip");
+    expect_dict_roundtrip(
+        { 'd', 'i', 'c', 't', '-', 'p', 'r', 'e', 'f', 'i', 'x' },
+        { 'd', 'i', 'c', 't', '-', 'p', 'a', 'y', 'l', 'o', 'a', 'd' },
+        0x7Bu,
+        "dictionary id raw-content roundtrip");
     {
         std::vector<uint8_t> input(140000);
         for (size_t i = 0; i < input.size(); ++i)
@@ -173,6 +216,36 @@ int main() {
               "compress level below range rejected");
         CHECK(orot_zstd_compress(src, 4, tiny, static_cast<int>(sizeof(tiny)), 10) == -1,
               "compress level above range rejected");
+    }
+    {
+        std::vector<uint8_t> input = { 's', 't', 'r', 'e', 'a', 'm' };
+        orot_zstd_cstream* cs = orot_zstd_compress_stream_new(1);
+        CHECK(cs != nullptr, "compress stream allocation");
+        CHECK(orot_zstd_compress_stream_update(cs, input.data(), 3) == 0,
+              "compress stream first update");
+        CHECK(orot_zstd_compress_stream_update(cs, input.data() + 3, 3) == 0,
+              "compress stream second update");
+        std::vector<uint8_t> compressed(64, 0);
+        int clen = orot_zstd_compress_stream_finish(
+            cs, compressed.data(), static_cast<int>(compressed.size()));
+        CHECK(clen > 0, "compress stream finish");
+        orot_zstd_compress_stream_free(cs);
+
+        orot_zstd_dstream* ds = orot_zstd_decompress_stream_new();
+        CHECK(ds != nullptr, "decompress stream allocation");
+        CHECK(orot_zstd_decompress_stream_update(ds, compressed.data(), clen / 2) == 0,
+              "decompress stream first update");
+        CHECK(orot_zstd_decompress_stream_update(ds, compressed.data() + clen / 2, clen - clen / 2) == 0,
+              "decompress stream second update");
+        std::vector<uint8_t> out(input.size() + 8, 0);
+        int dlen = orot_zstd_decompress_stream_finish(
+            ds, out.data(), static_cast<int>(out.size()));
+        CHECK_EQ(dlen, static_cast<int>(input.size()), "decompress stream finish");
+        if (dlen == static_cast<int>(input.size())) {
+            CHECK(std::memcmp(out.data(), input.data(), input.size()) == 0,
+                  "streaming roundtrip content");
+        }
+        orot_zstd_decompress_stream_free(ds);
     }
 
     {

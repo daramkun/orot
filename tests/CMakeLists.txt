@@ -87,6 +87,18 @@ if(OROT_DEFLATE_FUZZ)
             -fsanitize=fuzzer,address
         )
   endforeach()
+
+  add_executable(fuzz_zstd_decompress fuzz/fuzz_zstd_decompress.cpp)
+  target_link_libraries(fuzz_zstd_decompress PRIVATE orot)
+  target_include_directories(fuzz_zstd_decompress PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+  target_compile_options(fuzz_zstd_decompress PRIVATE
+        -fsanitize=fuzzer,address -O1 -g
+    )
+  target_link_options(fuzz_zstd_decompress PRIVATE
+        -fsanitize=fuzzer,address
+    )
 endif()
 
 # ── Benchmarks (-DOROT_BENCHMARK=ON) ─────────────────────────────────────────
@@ -96,7 +108,8 @@ if(OROT_BENCHMARK)
   add_orot_benchmark(bench_lzw bench/bench_lzw.cpp)
   add_orot_benchmark(bench_lzma bench/bench_lzma.cpp)
   add_orot_benchmark(bench_bzip2 bench/bench_bzip2.cpp)
-  message(STATUS "Deflate + LZ4 + LZW + LZMA + Bzip2: performance benchmarks enabled")
+  add_orot_benchmark(bench_zstd bench/bench_zstd.cpp)
+  message(STATUS "Deflate + LZ4 + LZW + LZMA + Bzip2 + Zstandard: performance benchmarks enabled")
 endif()
 
 # ── Comparison benchmarks (-DOROT_BENCHMARK_COMPARE=ON) ──────────────────────
@@ -181,6 +194,25 @@ if(OROT_BENCHMARK_COMPARE)
   # LZW comparison — bundles its own reference implementation; no external lib needed.
   add_orot_benchmark(bench_lzw_compare bench/bench_lzw_compare.cpp)
   message(STATUS "LZW: comparison benchmark enabled (orot vs bundled reference)")
+
+  find_library(LIBZSTD_LIB zstd
+        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+        PATH_SUFFIXES lib)
+  find_path(LIBZSTD_INCLUDE_DIR zstd.h
+        HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
+        PATH_SUFFIXES include)
+  if(NOT LIBZSTD_LIB OR NOT LIBZSTD_INCLUDE_DIR)
+    message(FATAL_ERROR "libzstd not found. Install with: brew install zstd")
+  endif()
+
+  add_executable(bench_zstd_compare bench/bench_zstd_compare.cpp)
+  target_link_libraries(bench_zstd_compare PRIVATE orot ${LIBZSTD_LIB})
+  target_include_directories(bench_zstd_compare PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${LIBZSTD_INCLUDE_DIR}
+    )
+  target_compile_options(bench_zstd_compare PRIVATE -O3)
+  message(STATUS "Zstandard: comparison benchmark enabled (orot + libzstd)")
 endif()
 
 # ── Cross-library compatibility tests (auto when OROT_TESTS=ON + zlib+libdeflate present) ──
