@@ -7,6 +7,7 @@ namespace orot { namespace zstd {
 static constexpr uint32_t ZSTD_MAGIC = 0xFD2FB528u;
 static constexpr int ZSTD_MAX_LEVEL = 9;
 static constexpr int ZSTD_MIN_LEVEL = 1;
+static constexpr int ZSTD_BLOCK_MAX_SIZE = 128 * 1024;
 
 int zstd_compress_bound(int src_len) noexcept;
 

@@ -9,14 +9,53 @@
 | C API 진입점 추가 | ✅ |
 | CMake 및 단위 테스트 연결 | ✅ |
 | 기본 함수 시그니처 정의 | ✅ |
+| Zstandard frame magic/header 파싱 | ✅ |
+| frame descriptor, window descriptor, content size, dictionary id 처리 | ✅ |
+| block header 파싱 | ✅ |
+| raw block 압축 해제 | ✅ |
+| RLE block 압축 해제 | ✅ |
+| checksum 옵션 파싱 및 XXH64 기반 검증 | ✅ |
+| malformed frame/block 에러 경로 테스트 | ✅ |
 
 ---
 
 ## 구현 개요
 
-현재 단계는 Zstandard 구현의 1단계 골격이다. 공개 API와 내부 모듈 경계를 먼저 고정하고, 실제 포맷 호환 압축/해제는 후속 단계에서 frame, block, entropy, sequence 처리 순서로 확장한다.
+현재 구현은 Zstandard 공개 API와 내부 모듈 경계를 고정하고, 압축 해제 쪽에서 frame/header 및 raw/RLE block을 처리한다. compressed block은 entropy decoder와 sequence decoder가 필요하므로 후속 단계에서 구현한다.
 
-압축기와 압축해제기는 아직 zstd 스트림을 생성하거나 해석하지 않는다. 두 함수는 기능 미구현을 명확히 표현하기 위해 `-1`을 반환한다.
+압축기는 아직 zstd 스트림을 생성하지 않는다. `orot_zstd_compress`는 기능 미구현을 명확히 표현하기 위해 `-1`을 반환한다.
+
+## Frame/Header 처리
+
+`orot_zstd_decompress`는 다음 frame header 필드를 파싱한다.
+
+| 필드 | 처리 |
+|------|------|
+| Magic number | little-endian `0xFD2FB528` 검증 |
+| Frame Header Descriptor | FCS, single segment, checksum, dictionary id 플래그 파싱 |
+| Reserved/unused bits | 설정된 경우 malformed frame으로 거부 |
+| Window Descriptor | non-single-segment frame에서 window size 계산 |
+| Dictionary ID | 0/1/2/4바이트 dictionary id 파싱 |
+| Frame Content Size | 1/2/4/8바이트 content size 파싱, 2바이트 form은 +256 적용 |
+
+content size가 제공된 frame은 출력 크기가 정확히 일치해야 성공한다.
+
+## Block 처리
+
+block header는 3바이트 little-endian 값으로 파싱한다.
+
+| Block type | 상태 | 동작 |
+|------------|------|------|
+| Raw block (`0`) | ✅ | block content를 그대로 출력 |
+| RLE block (`1`) | ✅ | content 1바이트를 block size만큼 반복 출력 |
+| Compressed block (`2`) | 준비됨 | entropy/sequence decoder 구현 전까지 `-1` 반환 |
+| Reserved (`3`) | ✅ | malformed block으로 거부 |
+
+block size는 Zstandard block 최대 크기인 128 KiB를 넘으면 거부한다.
+
+## Checksum
+
+`Content_Checksum_flag`가 설정된 frame은 해제 완료 후 decoded content에 대해 seed 0의 XXH64를 계산하고, 하위 32비트를 frame trailer의 little-endian checksum과 비교한다. 불일치 시 `-3`을 반환한다.
 
 ## 파일 구조
 
@@ -24,9 +63,9 @@
 include/orot/zstd.h        # Zstandard C API
 src/zstd/
 ├── zstd.hpp               # 내부 API, 상수, 모듈 경계
-└── zstd.cpp               # stage-1 기본 구현
+└── zstd.cpp               # frame/block parser + raw/RLE decompress
 src/api/zstd_api.cpp       # C API 진입점
-tests/unit/test_zstd.cpp   # stage-1 API 계약 테스트
+tests/unit/test_zstd.cpp   # frame/block parser + 에러 경로 테스트
 ```
 
 ## C API
@@ -47,10 +86,11 @@ int orot_zstd_decompress(const void* src, int src_size,
 - `>= 0`: 출력 바이트 수
 - `-1`: 미지원 또는 잘못된 입력
 - `-2`: 출력 버퍼 부족
+- `-3`: checksum mismatch
 
 ## 다음 단계
 
-2단계에서 Zstandard frame magic/header, block header, raw block, RLE block, checksum 옵션 파싱을 추가한다. 그 시점부터 `orot_zstd_decompress`는 제한된 zstd frame을 실제로 해제하기 시작한다.
+3단계에서 FSE 테이블 복원, FSE bitstream decoder, literal Huffman 테이블 복원 및 literal decode를 추가한다. 이 작업 이후 compressed block 해제 경로를 sequence/window decoder와 연결할 수 있다.
 
 ## 빌드 및 검증
 

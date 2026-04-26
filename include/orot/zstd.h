@@ -16,6 +16,7 @@ extern "C" {
  * Return convention: non-negative = byte count written; negative = error.
  *   -1: unsupported or invalid input
  *   -2: output buffer too small
+ *   -3: checksum mismatch
  */
 
 /**

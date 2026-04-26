@@ -24,13 +24,13 @@ Zstandard는 포맷 호환 압축 해제를 먼저 완성한 뒤, 검증 가능�
 
 ### 2단계: Frame 및 Block 파서
 
-- [ ] Zstandard frame magic/header 파싱
-- [ ] frame descriptor, window descriptor, content size, dictionary id 처리
-- [ ] block header 파싱
-- [ ] raw block 압축 해제
-- [ ] RLE block 압축 해제
-- [ ] checksum 옵션 파싱 및 XXH64 기반 검증
-- [ ] malformed frame/block 에러 경로 테스트
+- [x] Zstandard frame magic/header 파싱
+- [x] frame descriptor, window descriptor, content size, dictionary id 처리
+- [x] block header 파싱
+- [x] raw block 압축 해제
+- [x] RLE block 압축 해제
+- [x] checksum 옵션 파싱 및 XXH64 기반 검증
+- [x] malformed frame/block 에러 경로 테스트
 
 ### 3단계: Entropy Decoder
 

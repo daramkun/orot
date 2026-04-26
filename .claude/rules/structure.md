@@ -11,7 +11,7 @@ orot/
 │   ├── lzw.h               # LZW C API
 │   ├── lzma.h              # LZMA/LZMA2 C/C++ API
 │   ├── bzip2.h             # Bzip2 C/C++ API
-│   └── zstd.h              # Zstandard C API (stage-1 skeleton)
+│   └── zstd.h              # Zstandard C API
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -47,9 +47,9 @@ orot/
 │   │   ├── bzip2_huffman.{cpp,hpp} # 다중 Huffman 테이블 + selector
 │   │   ├── bzip2_compress.{cpp,hpp}   # 5단계 압축 파이프라인
 │   │   └── bzip2_decompress.{cpp,hpp} # 5단계 압축해제 파이프라인
-│   ├── zstd/               # Zstandard 구현 (stage-1 skeleton)
+│   ├── zstd/               # Zstandard 구현
 │   │   ├── zstd.hpp        # 내부 API, 상수, 모듈 경계
-│   │   └── zstd.cpp        # 기본 bound + 미구현 compress/decompress 반환
+│   │   └── zstd.cpp        # frame/block parser + raw/RLE 압축해제 + XXH64 checksum
 │   ├── api/                # C API 진입점
 │   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
@@ -92,7 +92,7 @@ orot/
 │   │   ├── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
 │   │   ├── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
 │   │   ├── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
-│   │   └── test_zstd.cpp             # Zstandard stage-1 API 계약
+│   │   └── test_zstd.cpp             # Zstandard frame/block parser + 에러 경로
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
