@@ -49,7 +49,9 @@ orot/
 │   │   └── bzip2_decompress.{cpp,hpp} # 5단계 압축해제 파이프라인
 │   ├── zstd/               # Zstandard 구현
 │   │   ├── zstd.hpp        # 내부 API, 상수, 모듈 경계
-│   │   └── zstd.cpp        # frame/block parser + raw/RLE 압축해제 + XXH64 checksum
+│   │   ├── fse.{cpp,hpp}   # FSE normalized count/table + reverse bitstream decoder
+│   │   ├── huf.{cpp,hpp}   # zstd literal Huffman table/stream decoder
+│   │   └── zstd.cpp        # frame/block parser + raw/RLE/compressed 압축해제 + XXH64 checksum
 │   ├── api/                # C API 진입점
 │   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
@@ -92,7 +94,7 @@ orot/
 │   │   ├── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
 │   │   ├── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
 │   │   ├── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
-│   │   └── test_zstd.cpp             # Zstandard frame/block parser + 에러 경로
+│   │   └── test_zstd.cpp             # Zstandard frame/block/compressed sample + 에러 경로
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)

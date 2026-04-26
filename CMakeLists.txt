@@ -74,6 +74,8 @@ set(OROT_BZIP2_SOURCES
 )
 
 set(OROT_ZSTD_SOURCES
+    src/zstd/fse.cpp
+    src/zstd/huf.cpp
     src/zstd/zstd.cpp
     src/api/zstd_api.cpp
 )

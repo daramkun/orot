@@ -34,31 +34,31 @@ Zstandard는 포맷 호환 압축 해제를 먼저 완성한 뒤, 검증 가능�
 
 ### 3단계: Entropy Decoder
 
-- [ ] FSE 테이블 복원 로직 구현
-- [ ] FSE bitstream decoder 구현
-- [ ] literal Huffman 테이블 복원 로직 구현
-- [ ] single-stream/multi-stream Huffman literal decode 구현
-- [ ] repeat mode 및 이전 entropy table 상태 관리
+- [x] FSE 테이블 복원 로직 구현
+- [x] FSE bitstream decoder 구현
+- [x] literal Huffman 테이블 복원 로직 구현
+- [x] single-stream/multi-stream Huffman literal decode 구현
+- [x] repeat mode 및 이전 entropy table 상태 관리
 - [ ] 독립 FSE/Huffman 단위 테스트 추가
 
 ### 4단계: Sequence 및 Window Decoder
 
-- [ ] literals section 파싱
-- [ ] sequences section 파싱
-- [ ] literal length, match length, offset code decode
-- [ ] repeated offset rules 구현
-- [ ] history/window copy 구현
-- [ ] block 간 window 유지
-- [ ] 공식 zstd로 생성한 샘플 압축 해제 호환 테스트 추가
+- [x] literals section 파싱
+- [x] sequences section 파싱
+- [x] literal length, match length, offset code decode
+- [x] repeated offset rules 구현
+- [x] history/window copy 구현
+- [x] block 간 window 유지
+- [x] 공식 zstd로 생성한 샘플 압축 해제 호환 테스트 추가
 
 ### 5단계: Decompressor 완성
 
-- [ ] `orot_zstd_decompress` 전체 frame 처리 완성
-- [ ] content size known/unknown 케이스 처리
-- [ ] skippable frame 처리
-- [ ] dictionary 미지원 케이스 명확한 에러 반환
-- [ ] boundary, truncated input, dst 부족 케이스 테스트
-- [ ] libzstd CLI/라이브러리 출력물과 교차 호환 테스트 추가
+- [x] `orot_zstd_decompress` 전체 frame 처리 완성
+- [x] content size known/unknown 케이스 처리
+- [x] skippable frame 처리
+- [x] dictionary 미지원 케이스 명확한 에러 반환
+- [x] boundary, truncated input, dst 부족 케이스 테스트
+- [x] libzstd CLI/라이브러리 출력물과 교차 호환 테스트 추가
 
 ### 6단계: 기본 Compressor
 
