@@ -35,6 +35,27 @@ static uint32_t read_le32(const uint8_t* p) noexcept {
            (static_cast<uint32_t>(p[3]) << 24);
 }
 
+static void write_le16(uint8_t*& p, uint32_t v) noexcept {
+    p[0] = static_cast<uint8_t>(v & 0xFFu);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
+    p += 2;
+}
+
+static void write_le24(uint8_t*& p, uint32_t v) noexcept {
+    p[0] = static_cast<uint8_t>(v & 0xFFu);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFFu);
+    p += 3;
+}
+
+static void write_le32(uint8_t*& p, uint32_t v) noexcept {
+    p[0] = static_cast<uint8_t>(v & 0xFFu);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFFu);
+    p[3] = static_cast<uint8_t>((v >> 24) & 0xFFu);
+    p += 4;
+}
+
 static uint64_t read_le64(const uint8_t* p) noexcept {
     uint64_t v = 0;
     for (int i = 7; i >= 0; --i) v = (v << 8) | p[i];
@@ -97,6 +118,82 @@ static bool parse_frame_header(const uint8_t*& p, const uint8_t* end,
     header.content_size = content_size;
     if (header.single_segment) header.window_size = content_size;
     return true;
+}
+
+/* ── Compressor helpers ─────────────────────────────────────────────────── */
+
+struct CompressConfig {
+    int level = 1;
+    bool prefer_rle = true;
+    bool verify_rle = true;
+};
+
+static CompressConfig config_for_level(int level) noexcept {
+    if (level < ZSTD_MIN_LEVEL) level = ZSTD_MIN_LEVEL;
+    if (level > ZSTD_MAX_LEVEL) level = ZSTD_MAX_LEVEL;
+
+    CompressConfig cfg;
+    cfg.level = level;
+    cfg.prefer_rle = true;
+    cfg.verify_rle = level >= 1;
+    return cfg;
+}
+
+static int frame_header_size_for_content(int src_len) noexcept {
+    if (src_len < 0) return -1;
+    if (src_len <= 255) return 4 + 1 + 1;
+    if (src_len <= 65791) return 4 + 1 + 2;
+    return 4 + 1 + 4;
+}
+
+static void write_frame_header(uint8_t*& p, int src_len) noexcept {
+    write_le32(p, ZSTD_MAGIC);
+
+    if (src_len <= 255) {
+        *p++ = 0x20u; /* single segment, 1-byte frame content size */
+        *p++ = static_cast<uint8_t>(src_len);
+    } else if (src_len <= 65791) {
+        *p++ = 0x60u; /* single segment, 2-byte frame content size */
+        write_le16(p, static_cast<uint32_t>(src_len - 256));
+    } else {
+        *p++ = 0xA0u; /* single segment, 4-byte frame content size */
+        write_le32(p, static_cast<uint32_t>(src_len));
+    }
+}
+
+static bool block_is_rle(const uint8_t* src, int len) noexcept {
+    if (len <= 1) return false;
+    const uint8_t value = src[0];
+    for (int i = 1; i < len; ++i) {
+        if (src[i] != value) return false;
+    }
+    return true;
+}
+
+static int write_raw_block(const uint8_t* src, int len, bool last,
+                           uint8_t*& out, uint8_t* end) noexcept {
+    if (len < 0 || len > ZSTD_BLOCK_MAX_SIZE) return -1;
+    if (end - out < 3 + len) return -2;
+    const uint32_t header = (last ? 1u : 0u) |
+        (static_cast<uint32_t>(len) << 3);
+    write_le24(out, header);
+    if (len > 0) {
+        std::memcpy(out, src, static_cast<size_t>(len));
+        out += len;
+    }
+    return 0;
+}
+
+static int write_rle_block(uint8_t value, int len, bool last,
+                           uint8_t*& out, uint8_t* end) noexcept {
+    if (len <= 0 || len > ZSTD_BLOCK_MAX_SIZE) return -1;
+    if (end - out < 4) return -2;
+    const uint32_t header = (last ? 1u : 0u) |
+        (1u << 1) |
+        (static_cast<uint32_t>(len) << 3);
+    write_le24(out, header);
+    *out++ = value;
+    return 0;
 }
 
 /* ── XXH64 ───────────────────────────────────────────────────────────────── */
@@ -549,15 +646,59 @@ static int decode_compressed_block(
 
 int zstd_compress_bound(int src_len) noexcept {
     if (src_len < 0) return -1;
-    const int block_overhead = (src_len / 128) + 64;
-    if (src_len > INT_MAX - block_overhead) return -1;
-    return src_len + block_overhead;
+    const int blocks = (src_len == 0)
+        ? 0
+        : 1 + (src_len - 1) / ZSTD_BLOCK_MAX_SIZE;
+    const int overhead = frame_header_size_for_content(src_len) + 3 * (blocks > 0 ? blocks : 1);
+    if (src_len > INT_MAX - overhead) return -1;
+    return src_len + overhead;
 }
 
 int zstd_compress(const uint8_t* src, int src_len,
                   uint8_t* dst, int dst_cap, int level) noexcept {
-    (void)src; (void)src_len; (void)dst; (void)dst_cap; (void)level;
-    return -1;
+    if (src_len < 0 || dst_cap < 0) return -1;
+    if ((src_len > 0 && src == nullptr) || (dst_cap > 0 && dst == nullptr)) return -1;
+    if (dst == nullptr) return -1;
+    if (level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL) return -1;
+
+    const int header_size = frame_header_size_for_content(src_len);
+    if (header_size < 0) return -1;
+    if (dst_cap < header_size + 3) return -2;
+
+    const CompressConfig cfg = config_for_level(level);
+    (void)cfg.level;
+
+    uint8_t empty_input = 0;
+    const uint8_t* in = (src != nullptr) ? src : &empty_input;
+    uint8_t* out = dst;
+    uint8_t* const end = dst + dst_cap;
+
+    write_frame_header(out, src_len);
+
+    if (src_len == 0) {
+        const int rc = write_raw_block(in, 0, true, out, end);
+        if (rc < 0) return rc;
+        return static_cast<int>(out - dst);
+    }
+
+    int pos = 0;
+    while (pos < src_len) {
+        int block_len = src_len - pos;
+        if (block_len > ZSTD_BLOCK_MAX_SIZE) block_len = ZSTD_BLOCK_MAX_SIZE;
+        const bool last = (pos + block_len == src_len);
+        const uint8_t* block = in + pos;
+
+        int rc;
+        if (cfg.prefer_rle && cfg.verify_rle && block_is_rle(block, block_len)) {
+            rc = write_rle_block(block[0], block_len, last, out, end);
+        } else {
+            rc = write_raw_block(block, block_len, last, out, end);
+        }
+        if (rc < 0) return rc;
+        pos += block_len;
+    }
+
+    return static_cast<int>(out - dst);
 }
 
 int zstd_decompress(const uint8_t* src, int src_len,

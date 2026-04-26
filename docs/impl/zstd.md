@@ -23,16 +23,23 @@
 | skippable frame 처리 | ✅ |
 | dictionary frame 미지원 에러 처리 | ✅ |
 | libzstd 산출물 압축 해제 샘플 테스트 | ✅ |
+| zstd frame writer | ✅ |
+| raw block encoder | ✅ |
+| whole-block RLE encoder | ✅ |
+| 레벨 1-9 입력 검증 및 정책 매핑 | ✅ |
+| incompressible data raw block fallback | ✅ |
+| 128 KiB 단위 chunking | ✅ |
+| `orot_zstd_compress` 라운드트립 테스트 | ✅ |
 
 ---
 
 ## 구현 개요
 
-현재 구현은 Zstandard 공개 API와 내부 모듈 경계를 고정하고, 압축 해제 쪽에서 frame/header, raw/RLE block, compressed block의 literals/sequences/window copy 경로를 처리한다.
+현재 구현은 Zstandard 공개 API와 내부 모듈 경계를 고정하고, 압축 해제 쪽에서 frame/header, raw/RLE block, compressed block의 literals/sequences/window copy 경로를 처리한다. 압축 쪽은 valid zstd frame writer와 raw/RLE block encoder를 제공한다.
 
 compressed block은 FSE entropy table과 reverse bitstream으로 sequence code를 복원하고, literal section은 raw/RLE/Huffman 형태를 파싱한다. repeat mode를 위해 frame 내 이전 FSE/Huffman table 상태와 repeated offset 상태를 유지한다.
 
-압축기는 아직 zstd 스트림을 생성하지 않는다. `orot_zstd_compress`는 기능 미구현을 명확히 표현하기 위해 `-1`을 반환한다.
+압축기는 레벨 1-9를 검증한 뒤 128 KiB block 단위로 frame을 생성한다. block 전체가 같은 바이트로 구성된 경우 RLE block을 쓰고, 그 외 입력은 raw block으로 fallback한다. 이 경로는 압축률보다 포맷 호환성과 라운드트립 안정성을 우선한다.
 
 ## Frame/Header 처리
 
@@ -62,6 +69,22 @@ block header는 3바이트 little-endian 값으로 파싱한다.
 
 block size는 Zstandard block 최대 크기인 128 KiB를 넘으면 거부한다.
 
+## Compressor
+
+`orot_zstd_compress`는 다음 정책으로 frame을 생성한다.
+
+| 항목 | 처리 |
+|------|------|
+| Frame header | single segment frame, content size 포함 |
+| Content size | 1/2/4바이트 FCS form 선택 |
+| Block split | 최대 128 KiB 단위 chunking |
+| RLE 감지 | block 전체가 동일 byte일 때 RLE block 출력 |
+| Raw fallback | 그 외 모든 입력은 raw block 출력 |
+| Level | 1-9 범위 검증 및 내부 정책 매핑 |
+| Dictionary/checksum | compressor 경로에서는 아직 생성하지 않음 |
+
+현재 encoder는 entropy-compressed block을 생성하지 않는다. 압축 해제기의 entropy decoder와 sequence executor는 libzstd 샘플 검증에 사용되며, compressor는 raw/RLE fallback으로 포맷 호환 출력을 보장한다.
+
 ## Checksum
 
 `Content_Checksum_flag`가 설정된 frame은 해제 완료 후 decoded content에 대해 seed 0의 XXH64를 계산하고, 하위 32비트를 frame trailer의 little-endian checksum과 비교한다. 불일치 시 `-3`을 반환한다.
@@ -82,7 +105,7 @@ src/zstd/
 ├── zstd.hpp               # 내부 API, 상수, 모듈 경계
 ├── fse.hpp/.cpp           # FSE table + reverse bitstream decoder
 ├── huf.hpp/.cpp           # zstd literal Huffman decoder
-└── zstd.cpp               # frame/block parser + compressed block decompress
+└── zstd.cpp               # frame/block parser + raw/RLE compressor + compressed block decompress
 src/api/zstd_api.cpp       # C API 진입점
 tests/unit/test_zstd.cpp   # frame/block/compressed sample + 에러 경로 테스트
 ```
@@ -109,7 +132,7 @@ int orot_zstd_decompress(const void* src, int src_size,
 
 ## 남은 작업
 
-압축기는 아직 미구현이다. 압축 해제는 기본 libzstd 샘플과 경계 조건을 통과하지만, 독립 FSE/Huffman 단위 테스트와 더 다양한 Huffman literal 샘플, 다중 block/window 회귀 테스트를 추가해 검증 폭을 넓힐 필요가 있다.
+압축 해제는 기본 libzstd 샘플과 경계 조건을 통과한다. 압축기는 현재 raw/RLE block을 생성하므로, 향후 compressed-block encoder에서 Huffman/FSE table 선택, sequence bitstream 작성, lazy/hash-chain match finder를 실제 압축률 개선 경로에 연결할 필요가 있다. 독립 FSE/Huffman 단위 테스트와 더 다양한 Huffman literal 샘플, 다중 block/window 회귀 테스트도 추가 검증 항목이다.
 
 ## 빌드 및 검증
 

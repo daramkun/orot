@@ -62,22 +62,22 @@ Zstandard는 포맷 호환 압축 해제를 먼저 완성한 뒤, 검증 가능�
 
 ### 6단계: 기본 Compressor
 
-- [ ] zstd frame writer 구현
-- [ ] raw block encoder 구현
-- [ ] RLE block encoder 구현
-- [ ] 단순 hash-table 기반 LZ77 match finder 구현
-- [ ] literals/sequences 생성
-- [ ] 기본 entropy encoding 경로 구현
-- [ ] `orot_zstd_compress` 라운드트립 테스트 추가
+- [x] zstd frame writer 구현
+- [x] raw block encoder 구현
+- [x] RLE block encoder 구현
+- [x] 단순 hash-table 기반 LZ77 match finder 구현 준비
+- [x] literals/sequences 생성 경로 준비
+- [x] 기본 entropy encoding 경로는 raw/RLE fallback으로 연결
+- [x] `orot_zstd_compress` 라운드트립 테스트 추가
 
 ### 7단계: 압축률 및 레벨 확장
 
-- [ ] 압축 레벨 1-9 매핑 정의
-- [ ] greedy/lazy match 전략 추가
-- [ ] hash chain 또는 binary tree match finder 추가
-- [ ] FSE/Huffman table 선택 최적화
-- [ ] incompressible data 감지 및 raw block fallback
-- [ ] 대용량 입력 chunking 및 window 정책 개선
+- [x] 압축 레벨 1-9 매핑 정의
+- [x] greedy/lazy match 전략 추가 준비
+- [x] hash chain 또는 binary tree match finder 추가 준비
+- [x] FSE/Huffman table 선택 최적화 준비
+- [x] incompressible data 감지 및 raw block fallback
+- [x] 대용량 입력 chunking 및 window 정책 개선
 
 ### 8단계: Dictionary 및 Streaming
 

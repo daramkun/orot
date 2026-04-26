@@ -125,17 +125,55 @@ static void expect_decompress_error(
     CHECK(rc == expected, label);
 }
 
+static void expect_roundtrip(
+    const std::vector<uint8_t>& input,
+    int level,
+    const char* label)
+{
+    const int bound = orot_zstd_compress_bound(static_cast<int>(input.size()));
+    CHECK(bound > 0, label);
+    std::vector<uint8_t> compressed(static_cast<size_t>(bound), 0);
+    const int compressed_size = orot_zstd_compress(
+        input.data(), static_cast<int>(input.size()),
+        compressed.data(), static_cast<int>(compressed.size()),
+        level);
+    CHECK(compressed_size > 0, label);
+    if (compressed_size <= 0) return;
+
+    std::vector<uint8_t> out(input.size() + 16, 0);
+    const int decompressed_size = orot_zstd_decompress(
+        compressed.data(), compressed_size,
+        out.data(), static_cast<int>(out.size()));
+    CHECK_EQ(decompressed_size, static_cast<int>(input.size()), label);
+    if (decompressed_size == static_cast<int>(input.size()) && !input.empty()) {
+        CHECK(std::memcmp(out.data(), input.data(), input.size()) == 0, label);
+    }
+}
+
 int main() {
     CHECK(orot_zstd_compress_bound(0) >= 0, "empty bound is valid");
     CHECK(orot_zstd_compress_bound(1024) >= 1024, "bound covers input size");
     CHECK(orot_zstd_compress_bound(-1) == -1, "negative bound rejected");
 
-    const uint8_t src[] = { 'z', 's', 't', 'd' };
-    std::vector<uint8_t> compressed(128);
-
-    CHECK(orot_zstd_compress(src, 4, compressed.data(),
-                             static_cast<int>(compressed.size()), 1) == -1,
-          "compressor remains unsupported until encoder stage");
+    expect_roundtrip({}, 1, "empty input roundtrip");
+    expect_roundtrip({ 'z', 's', 't', 'd' }, 1, "small raw roundtrip");
+    expect_roundtrip(std::vector<uint8_t>(1024, 'Q'), 9, "RLE roundtrip");
+    {
+        std::vector<uint8_t> input(140000);
+        for (size_t i = 0; i < input.size(); ++i)
+            input[i] = static_cast<uint8_t>((i * 131u + 17u) & 0xFFu);
+        expect_roundtrip(input, 6, "multi-block raw roundtrip");
+    }
+    {
+        const uint8_t src[] = { 'z', 's', 't', 'd' };
+        uint8_t tiny[4] = {};
+        CHECK(orot_zstd_compress(src, 4, tiny, 4, 1) == -2,
+              "compress dst too small");
+        CHECK(orot_zstd_compress(src, 4, tiny, static_cast<int>(sizeof(tiny)), 0) == -1,
+              "compress level below range rejected");
+        CHECK(orot_zstd_compress(src, 4, tiny, static_cast<int>(sizeof(tiny)), 10) == -1,
+              "compress level above range rejected");
+    }
 
     {
         std::vector<uint8_t> payload = { 'h', 'e', 'l', 'l', 'o' };

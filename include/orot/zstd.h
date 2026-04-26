@@ -9,9 +9,9 @@ extern "C" {
 /**
  * orot Zstandard (zstd) API
  *
- * Initial public API for whole-buffer Zstandard support. The entry points are
- * present so consumers can compile against the zstd surface while the frame,
- * block, entropy, and sequence decoders are implemented in later stages.
+ * Whole-buffer Zstandard support. The compressor emits valid zstd frames using
+ * raw blocks and whole-block RLE blocks; the decompressor handles raw/RLE blocks
+ * and the implemented compressed-block decode path.
  *
  * Return convention: non-negative = byte count written; negative = error.
  *   -1: unsupported or invalid input
@@ -27,8 +27,7 @@ int orot_zstd_compress_bound(int src_size);
 /**
  * Compress src_size bytes from src into dst using Zstandard frame format.
  *
- * level: 1 (fastest) ... 9 (best compression). Level handling is reserved for
- * the compressor implementation stage.
+ * level: 1 (fastest) ... 9 (best compression).
  *
  * Returns bytes written to dst, or a negative error code.
  */
