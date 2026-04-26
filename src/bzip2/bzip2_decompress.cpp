@@ -1,6 +1,5 @@
 #include "bzip2_decompress.hpp"
 #include "bzip2_crc.hpp"
-#include "bwt.hpp"
 #include "bzip2_huffman.hpp"
 
 #include <vector>
@@ -51,46 +50,25 @@ struct BitReader {
     }
 };
 
-/* ── RLE1 decode ─────────────────────────────────────────────────────────── */
+/* ── Block decode ────────────────────────────────────────────────────────── */
 
-static bool rle1_decode(const uint8_t* in, uint32_t in_len,
-                         uint8_t* out, size_t out_cap, size_t& out_len)
-{
-    out_len = 0;
-    int    run_cnt = 0;
-    uint8_t run_ch = 0;
+static constexpr uint32_t BZ2_BLOCK_MAX = 900001;
 
-    for (uint32_t i = 0; i < in_len; ) {
-        uint8_t c = in[i++];
-        if (out_len >= out_cap) return false;
-        out[out_len++] = c;
-
-        if (c == run_ch) {
-            ++run_cnt;
-        } else {
-            run_ch  = c;
-            run_cnt = 1;
-        }
-
-        if (run_cnt == 4) {
-            if (i >= in_len) return false;
-            uint8_t cnt = in[i++];
-            if (out_len + (size_t)cnt > out_cap) return false;
-            memset(out + out_len, c, (size_t)cnt);
-            out_len += (size_t)cnt;
-            run_cnt = 0;
-        }
-    }
-    return true;
-}
-
-/* ── RLE2 / Huffman decode ───────────────────────────────────────────────── */
-
+/*
+ * decode_block: fused Huffman+MTF decode → BWT pack → inline BWT walk+RLE1+CRC.
+ *
+ * Architecture (libbz2-inspired):
+ *   Phase 1 — Huffman + MTF decode: decoded chars written to tt[] lower 8 bits,
+ *              unzftab[] counts accumulated. No separate mtf_out buffer.
+ *   Phase 2 — BWT pack: tt[cftab[char]] |= (i<<8). Char stays in low 8 bits.
+ *   Phase 3 — Output walk: tt[tPos] gives (char | next<<8). CRC computed inline
+ *              alongside RLE1 expansion — avoids a separate crc32_block pass over
+ *              potentially-cold dst memory.
+ */
 static bool decode_block(BitReader& br,
                           uint8_t* dst, size_t dst_cap, size_t& written,
                           uint32_t* block_crc_out,
-                          std::vector<uint32_t>& ibwt_buf,
-                          std::vector<uint8_t>& bwt_inv_buf)
+                          std::vector<uint32_t>& tt)
 {
     /* Block CRC (32 bits) */
     uint32_t hi = br.read_bits(16);
@@ -119,20 +97,21 @@ static bool decode_block(BitReader& br,
             if (fine & (1u << (15 - j))) in_use[i * 16 + j] = 1;
     }
 
-    /* Build symbol-to-rank mapping */
+    /* Build sequential-index → actual-byte mapping */
     int sym_map[256];
     int n_in_use = 0;
     for (int i = 0; i < 256; ++i)
         if (in_use[i]) sym_map[n_in_use++] = i;
+    if (n_in_use == 0) return false;
     int alpha_size = n_in_use + 2;
 
-    /* Number of tables and selectors */
+    /* Number of Huffman tables and selectors */
     uint32_t n_tables = br.read_bits(3);
     uint32_t n_selectors = br.read_bits(15);
     if (n_tables < 2 || n_tables > 6) return false;
     if (n_selectors == (uint32_t)-1) return false;
 
-    /* Read selectors (MTF-coded) */
+    /* Read selectors (MTF-coded, max 6 tables → unrolled shift is safe) */
     std::vector<uint8_t> selectors(n_selectors);
     {
         uint8_t order[BZ_MAX_TABLES];
@@ -174,23 +153,20 @@ static bool decode_block(BitReader& br,
         dec_tables[t].build_from_lengths(lens, alpha_size);
     }
 
-    /* Decode symbol stream */
-    std::vector<uint8_t> mtf_out;
-    mtf_out.reserve(900000);
-    int EOB = alpha_size - 1;
+    /* ── Phase 1: Huffman + MTF → tt[] ─────────────────────────────────────── */
+
+    uint32_t* tt_data = tt.data();  /* already sized BZ2_BLOCK_MAX by caller */
+
+    /* MTF list — actual byte values, index == rank */
+    uint8_t mtf_sym[256];
+    for (int i = 0; i < n_in_use; ++i) mtf_sym[i] = (uint8_t)sym_map[i];
+
+    uint32_t unzftab[256] = {};
+    uint32_t nblock = 0;
+    const int EOB = alpha_size - 1;
     uint32_t g = 0, g_cnt = 0;
     uint8_t cur_tbl = selectors[0];
-    uint32_t run = 0;
-    uint32_t run_mul = 1;
-
-    auto flush_run = [&]() {
-        if (run > 0) {
-            size_t old_sz = mtf_out.size();
-            mtf_out.resize(old_sz + run);
-            memset(mtf_out.data() + old_sz, 0, run);
-            run = 0; run_mul = 1;
-        }
-    };
+    uint32_t run = 0, run_mul = 1;
 
     while (true) {
         if (g_cnt == BZ_G_SIZE) {
@@ -199,55 +175,103 @@ static bool decode_block(BitReader& br,
             if (g >= n_selectors) return false;
             cur_tbl = selectors[g];
         }
-
-        /* Pre-fill buffer before decode to reduce per-bit refill overhead */
         br.refill();
-
         int sym = dec_tables[cur_tbl].decode_sym(
             br.buf, br.buf_bits, br.src, br.src_size, br.pos);
         ++g_cnt;
-
         if (sym < 0) return false;
-        if (sym == EOB) { flush_run(); break; }
+
         if (sym == BZ_RUNA) { run += run_mul;     run_mul <<= 1; continue; }
         if (sym == BZ_RUNB) { run += 2 * run_mul; run_mul <<= 1; continue; }
-        flush_run();
-        run_mul = 1;
-        mtf_out.push_back((uint8_t)(sym - 1));
+
+        /* Flush any pending RUNA/RUNB run: copies of MTF[0] */
+        if (run > 0) {
+            if (nblock + run > BZ2_BLOCK_MAX) return false;
+            uint8_t uc = mtf_sym[0];
+            for (uint32_t r = 0; r < run; r++) tt_data[nblock + r] = (uint32_t)uc;
+            unzftab[uc] += run;
+            nblock += run;
+            run = 0; run_mul = 1;
+        }
+
+        if (sym == EOB) break;
+
+        /* MTF decode: sym-1 = rank */
+        uint8_t rank = (uint8_t)(sym - 1);
+        if ((int)rank >= n_in_use) return false;
+        uint8_t uc = mtf_sym[rank];
+        if (rank != 0) {
+            memmove(mtf_sym + 1, mtf_sym, rank);
+            mtf_sym[0] = uc;
+        }
+
+        if (nblock >= BZ2_BLOCK_MAX) return false;
+        tt_data[nblock++] = (uint32_t)uc;
+        unzftab[uc]++;
     }
 
-    /* MTF decode (inline, with rank==0 fast path) */
-    uint32_t mtf_len = (uint32_t)mtf_out.size();
-    {
-        uint8_t mtf_sym[256];
-        for (int i = 0; i < n_in_use; ++i) mtf_sym[i] = (uint8_t)sym_map[i];
-        for (uint32_t i = 0; i < mtf_len; ++i) {
-            uint8_t rank = mtf_out[i];
-            if ((int)rank >= n_in_use) return false;
-            uint8_t c = mtf_sym[rank];
-            if (rank != 0) {
-                memmove(mtf_sym + 1, mtf_sym, rank);
-                mtf_sym[0] = c;
+    if (primary >= nblock) return false;
+
+    /* ── Phase 2: BWT pack — char stays in low 8 bits, source-index in [8..31] */
+
+    uint32_t cftab[257] = {};
+    for (int i = 1; i <= 256; i++) cftab[i] = unzftab[i-1];
+    for (int i = 1; i <= 256; i++) cftab[i] += cftab[i-1];
+    for (int i = 0; i <= 256; i++) if (cftab[i] > nblock) return false;
+
+    for (uint32_t i = 0; i < nblock; i++) {
+        uint8_t uc = (uint8_t)(tt_data[i] & 0xFF);
+        tt_data[cftab[uc]] |= ((uint32_t)i << 8);
+        cftab[uc]++;
+    }
+
+    /* ── Phase 3: BWT walk + RLE1 + CRC — all inline (no re-read of dst) ───── */
+
+    /* Restore all hot state to locals (encourages register allocation) */
+    uint32_t c_crc    = 0xFFFFFFFFu;
+    size_t   c_outpos = written;
+    uint8_t  c_run_ch = 0;
+    int      c_run_cnt = 0;
+    uint32_t c_tPos   = tt_data[primary] >> 8;
+    uint32_t c_nb     = 0;
+
+    while (c_nb < nblock) {
+        uint32_t packed = tt_data[c_tPos];
+        uint8_t c = (uint8_t)(packed & 0xFF);
+        c_tPos = packed >> 8;
+        c_nb++;
+
+        if (c_outpos >= dst_cap) return false;
+        dst[c_outpos++] = c;
+        c_crc = (c_crc << 8) ^ detail::CRC32_TABLE[((c_crc >> 24) ^ c) & 0xFF];
+
+        if (c == c_run_ch) {
+            c_run_cnt++;
+            if (c_run_cnt == 4) {
+                /* Consume run-length count byte from BWT walk */
+                if (c_nb >= nblock) return false;
+                packed = tt_data[c_tPos];
+                uint32_t cnt = packed & 0xFF;
+                c_tPos = packed >> 8;
+                c_nb++;
+
+                if (c_outpos + cnt > dst_cap) return false;
+                memset(dst + c_outpos, c_run_ch, cnt);
+                /* Update CRC for the expanded run */
+                for (uint32_t r = 0; r < cnt; r++)
+                    c_crc = (c_crc << 8) ^ detail::CRC32_TABLE[((c_crc >> 24) ^ c_run_ch) & 0xFF];
+                c_outpos += cnt;
+                c_run_cnt = 0;
             }
-            mtf_out[i] = c;
+        } else {
+            c_run_ch  = c;
+            c_run_cnt = 1;
         }
     }
 
-    /* BWT inverse */
-    bwt_inv_buf.resize(mtf_len);
-    bwt_inverse(mtf_out.data(), bwt_inv_buf.data(), mtf_len, primary, ibwt_buf);
-
-    /* RLE1 decode directly into dst */
-    size_t rle1_len = 0;
-    if (!rle1_decode(bwt_inv_buf.data(), mtf_len, dst + written,
-                     dst_cap - written, rle1_len))
-        return false;
-
-    /* Verify CRC */
-    uint32_t computed = crc32_block(dst + written, rle1_len);
-    if (computed != *block_crc_out) return false;
-
-    written += rle1_len;
+    c_crc ^= 0xFFFFFFFFu;
+    if (c_crc != *block_crc_out) return false;
+    written = c_outpos;
     return true;
 }
 
@@ -267,8 +291,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
 
     size_t written = 0;
     uint32_t combined_crc = 0;
-    std::vector<uint32_t> ibwt_buf;
-    std::vector<uint8_t>  bwt_inv_buf;
+    std::vector<uint32_t> tt(BZ2_BLOCK_MAX);  /* sized once, reused across blocks */
 
     while (true) {
         uint32_t m0 = br.read_bits(16);
@@ -277,7 +300,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
         if (m0 == (uint32_t)-1) return 0;
 
         if (m0 == 0x1772 && m1 == 0x4538 && m2 == 0x5090) {
-            /* Stream end */
+            /* Stream end marker */
             uint32_t shi = br.read_bits(16);
             uint32_t slo = br.read_bits(16);
             if (shi == (uint32_t)-1 || slo == (uint32_t)-1) return 0;
@@ -288,7 +311,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
         if (m0 != 0x3141 || m1 != 0x5926 || m2 != 0x5359) return 0;
 
         uint32_t block_crc = 0;
-        if (!decode_block(br, dst, dst_cap, written, &block_crc, ibwt_buf, bwt_inv_buf))
+        if (!decode_block(br, dst, dst_cap, written, &block_crc, tt))
             return 0;
         combined_crc = crc32_combine(combined_crc, block_crc);
     }
