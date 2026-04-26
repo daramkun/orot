@@ -155,12 +155,17 @@ cmake --build build --target bench_bzip2_compare
 | BWT counting sort `%n` → 조건부 빼기 | BWT ~10-20% 향상 |
 | Huffman fast decode (10-bit 룩업 테이블) | 압축해제 1.3-2.9x (random) |
 | MTF rank==0 fast path | 소폭 전체 향상 |
+| MTF rank 1~8 수동 이동 | 구조적 데이터에서 작은 `memmove` 호출 감소 |
 | RLE1 decode memset | zeros 해제 소폭 향상 |
 | 64-bit BitReader/Writer | 전체 속도 향상 |
 | flush_run resize+memset | 대형 run 해제 향상 |
+| IBWT `tt`에 문자+next index pack | BWT walk 랜덤 로드 수 감소 |
+| run-heavy 블록 CRC 지연 시작 | RLE 확장 블록에서 per-byte CRC 비용 감소 |
+| thread-local 해제 scratch 버퍼 | 반복 whole-buffer 해제의 할당/초기화 비용 감소 |
+| RUNA/RUNB 단일 분기 처리 | RLE2 run decode hot path 분기 감소 |
 
 ## 알려진 제한
 
 - Randomized block (`rnd_flag=1`) 미지원 (사용 빈도 매우 낮음)
-- zeros 해제 속도: libbz2가 trivial Huffman 코드에 특화 최적화 보유, orot 0.2x (MSB-first CRC32 슬라이싱 불가)
+- zeros/text/code 일부 레벨 해제 속도: libbz2가 trivial Huffman/RLE 블록에 특화 최적화 보유, orot은 데이터/레벨에 따라 0.6~0.9x 수준
 - random 1MB 압축: libbz2 대비 0.7-0.8x (고엔트로피 데이터는 카운팅 정렬 사용, libbz2 최적화 C 코드 우세)
