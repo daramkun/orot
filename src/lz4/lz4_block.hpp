@@ -73,4 +73,13 @@ int lz4_block_decompress(
     const uint8_t* src, int src_len,
     uint8_t* dst, int dst_cap) noexcept;
 
+/**
+ * Decompress a raw LZ4 block while allowing matches to reference bytes in the
+ * already-produced output prefix [prefix_base, dst). Used by linked LZ4 frames.
+ */
+int lz4_block_decompress_with_prefix(
+    const uint8_t* src, int src_len,
+    uint8_t* prefix_base,
+    uint8_t* dst, int dst_cap) noexcept;
+
 } } /* namespace orot::lz4 */

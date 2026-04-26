@@ -157,11 +157,11 @@ int lz4f_decompress(
     if (read_le32(ip) != LZ4F_MAGIC) return -1;
     ip += 4;
 
-    /* FLG */
-    if (ip + 3 > ip_end) return -1;
+    /* FLG + BD + optional fields + HC */
+    if (ip + 2 > ip_end) return -1;
+    const uint8_t* hdr_start = ip;
     uint8_t flg = *ip++;
     uint8_t bd  = *ip++;
-    uint8_t hc  = *ip++;
     (void)bd;
 
     /* Validate version bits [7:6] == 01 */
@@ -174,14 +174,23 @@ int lz4f_decompress(
         ip += 8; /* skip content size */
     }
 
+    bool has_dict_id = (flg & 0x01) != 0;
+    if (has_dict_id) {
+        if (ip + 4 > ip_end) return -1;
+        ip += 4; /* skip dictionary id */
+    }
+
+    if (ip + 1 > ip_end) return -1;
+    uint8_t hc = *ip++;
+
     /* Validate header checksum */
     {
-        const uint8_t* hdr_start = src + 4; /* FLG byte */
-        int hdr_len = static_cast<int>(ip - hdr_start) - 1; /* exclude HC byte */
+        int hdr_len = static_cast<int>((ip - 1) - hdr_start); /* exclude HC byte */
         if (header_checksum(hdr_start, hdr_len) != hc) return -1;
     }
 
     bool has_content_cs = (flg & LZ4F_FLAG_CONTENT_CS) != 0;
+    bool block_independent = (flg & 0x20) != 0;
 
     XXH32State content_xxh;
     content_xxh.reset(0);
@@ -210,9 +219,10 @@ int lz4f_decompress(
             op += block_data_len;
         } else {
             int avail = static_cast<int>(op_end - op);
-            int decompressed = lz4_block_decompress(
+            uint8_t* prefix_base = block_independent ? op : dst;
+            int decompressed = lz4_block_decompress_with_prefix(
                 ip, block_data_len,
-                op, avail);
+                prefix_base, op, avail);
             if (decompressed < 0) {
                 return (decompressed == -2) ? -2 : -1;
             }

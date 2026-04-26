@@ -31,7 +31,8 @@ size_t lzma2_decompress(
 
     /* Temp buffer for reconstructing LZMA-alone format per chunk */
     static constexpr size_t kChunkMax = 1u << 16;
-    std::unique_ptr<uint8_t[]> tmp(new (std::nothrow) uint8_t[13 + kChunkMax + 64]);
+    size_t tmp_cap = 13 + kChunkMax + 4096;
+    std::unique_ptr<uint8_t[]> tmp(new (std::nothrow) uint8_t[tmp_cap]);
     if (!tmp) return 0;
 
     const uint8_t* p   = src;
@@ -47,8 +48,8 @@ size_t lzma2_decompress(
         if (hdr == 0x01 || hdr == 0x02) {
             /* Uncompressed chunk */
             if (p + 2 > end) return 0;
-            uint16_t usz16;
-            memcpy(&usz16, p, 2); p += 2;
+            uint16_t usz16 = ((uint16_t)p[0] << 8) | (uint16_t)p[1];
+            p += 2;
             size_t usz = (size_t)usz16 + 1;
 
             if (p + usz > end) return 0;
@@ -72,17 +73,22 @@ size_t lzma2_decompress(
 
         if ((hdr & 0x80) == 0) return 0;  /* unknown chunk type */
 
-        /* LZMA chunk */
-        bool reset_props = (hdr & 0x20) != 0;
-        bool reset_state = (hdr & 0x10) != 0;
-        bool reset_dict  = (hdr & 0x08) != 0;
+        /* LZMA chunk. The control byte carries mode bits plus the high five
+         * bits of the uncompressed size. Multi-byte sizes are big-endian in
+         * raw LZMA2 streams. */
+        bool reset_dict  = hdr >= 0xE0;
+        bool reset_props = hdr >= 0xC0;
+        bool reset_state = hdr >= 0xA0;
 
         if (p + 4 > end) return 0;
-        uint16_t csz16, usz16;
-        memcpy(&csz16, p, 2); p += 2;
-        memcpy(&usz16, p, 2); p += 2;
-        size_t csz = (size_t)csz16 + 1;  /* RC data size */
-        size_t usz = (size_t)usz16 + 1;  /* uncompressed size */
+        size_t usz = (((size_t)hdr & 0x1Fu) << 16)
+                   | ((size_t)p[0] << 8)
+                   | (size_t)p[1];
+        p += 2;
+        size_t csz = ((size_t)p[0] << 8) | (size_t)p[1];
+        p += 2;
+        ++usz;
+        ++csz;
 
         if (reset_props) {
             if (p >= end) return 0;
@@ -107,6 +113,11 @@ size_t lzma2_decompress(
 
         if (p + csz > end) return 0;
         if (out_pos + usz > dst_cap) return 0;
+        if (13 + csz > tmp_cap) {
+            tmp_cap = 13 + csz;
+            tmp.reset(new (std::nothrow) uint8_t[tmp_cap]);
+            if (!tmp) return 0;
+        }
 
         /* Reconstruct LZMA-alone format:
          * [1B props][4B dict_size][8B usz][5B RC init][csz bytes RC data] */

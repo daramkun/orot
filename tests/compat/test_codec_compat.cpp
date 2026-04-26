@@ -60,42 +60,11 @@ static bool is_expected_failure(
     const char* comp_lib,
     const char* decomp_lib)
 {
-    if (std::strcmp(codec, "LZ4") == 0 &&
-        std::strcmp(comp_lib, "orot") == 0 &&
-        std::strcmp(decomp_lib, "liblz4") == 0 &&
-        (std::strcmp(dataset, "text") == 0 ||
-         std::strcmp(dataset, "zeros") == 0 ||
-         std::strcmp(dataset, "code") == 0)) {
-        (void)fmt;
-        return true;
-    }
-
-    if (std::strcmp(codec, "LZ4") == 0 &&
-        std::strcmp(fmt, "frame") == 0 &&
-        std::strcmp(dataset, "text") == 0 &&
-        std::strcmp(comp_lib, "liblz4") == 0 &&
-        std::strcmp(decomp_lib, "orot") == 0) {
-        return true;
-    }
-
-    if (std::strcmp(codec, "LZMA") == 0 &&
-        std::strcmp(comp_lib, "orot") == 0 &&
-        std::strcmp(decomp_lib, "liblzma") == 0) {
-        return true;
-    }
-
-    if (std::strcmp(codec, "LZMA2") == 0) {
-        if (std::strcmp(comp_lib, "liblzma") == 0 &&
-            std::strcmp(decomp_lib, "orot") == 0) {
-            return true;
-        }
-        if (std::strcmp(comp_lib, "orot") == 0 &&
-            std::strcmp(decomp_lib, "liblzma") == 0 &&
-            std::strcmp(dataset, "random") != 0) {
-            return true;
-        }
-    }
-
+    (void)codec;
+    (void)fmt;
+    (void)dataset;
+    (void)comp_lib;
+    (void)decomp_lib;
     return false;
 }
 

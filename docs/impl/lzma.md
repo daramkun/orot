@@ -10,6 +10,7 @@
 | 확률 모델 + 상태기계 (lzma_prob_model.hpp) | ✅ |
 | C API 진입점 (lzma_api.cpp) | ✅ |
 | 단위 테스트 (test_lzma.cpp) | ✅ |
+| liblzma 교차 호환 테스트 (test_codec_compat.cpp) | ✅ |
 | 벤치마크 (bench_lzma, bench_lzma_compare) | ✅ |
 
 ---
@@ -37,7 +38,7 @@ orot의 LZMA 구현은 범위 코딩(range coding) 기반의 Lempel-Ziv-Markov c
 - 정밀도: 11비트 확률 테이블 (`kProbBits = 11`, `kProbTotal = 2048`)
 - 정규화 임계값: `range < (1u << 24)` 시 바이트 시프트
 - 확률 갱신 속도: `kMoveBits = 5`
-- 엔코더 플러시: 5바이트 종료 마커
+- 엔코더 플러시: known-size LZMA alone 스트림에 맞춘 5바이트 range flush
 
 ### LZMA 상태기계
 
@@ -53,15 +54,19 @@ orot의 LZMA 구현은 범위 코딩(range coding) 기반의 Lempel-Ziv-Markov c
 [4 bytes: dict_size (LE)]
 [8 bytes: uncompressed_size (LE, 0xFFFFFFFFFFFFFFFF = 미지정)]
 [RC data ...]
-[end-of-stream 마커 (dist = 0xFFFFFFFF)]
 ```
+
+orot encoder는 `uncompressed_size`를 명시하는 known-size 스트림을 출력하므로
+EOS distance marker를 쓰지 않는다. 이 형태가 liblzma `lzma_alone_decoder`와
+상호 호환된다.
 
 ### LZMA2 청크 스트림
 
 - 64KB 단위 독립 청크
-- 청크 헤더 타입: `0x80|flags` (LZMA), `0x01/0x02` (비압축), `0x00` (EOS)
-- 압축 후 크기가 원본 이상이면 비압축 청크로 폴백
-- 최대 딕셔너리 32MB 고정 할당 (청크 간 재사용)
+- encoder 출력 청크: `0x01/0x02` 비압축 청크 + `0x00` EOS
+- uncompressed size 필드는 LZMA2 규격대로 big-endian `size - 1`
+- decoder는 liblzma가 출력하는 LZMA 압축 청크(`0x80..0xFF`)와 비압축 청크를 모두 처리
+- 최대 딕셔너리 32MB 고정 할당
 
 ---
 

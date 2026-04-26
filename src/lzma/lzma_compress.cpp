@@ -244,20 +244,6 @@ size_t lzma_compress(
                    | (prev >> (8 - cfg.lc)));
     };
 
-    /* For empty input: just emit end marker */
-    if (src_len == 0) {
-        /* Encode end-of-stream marker: match with distance 0xFFFFFFFF */
-        int ps = 0;
-        rc.encode_bit(&pt->is_match[state.state][ps], 1);
-        rc.encode_bit(&pt->is_rep[state.state], 0);
-        encode_len(rc, pt->match_len, 2, ps);
-        /* Distance slot for end marker (0xFFFFFFFF → slot 63) */
-        rc.encode_bit_tree(pt->dist_slot[0], kNumPosSlotBits, 63);
-        int footerBits = (63 >> 1) - 1;  /* 30 */
-        rc.encode_direct_bits(0xFFFFFF, footerBits - kNumAlignBits);
-        rc.encode_bit_tree_reverse(pt->dist_align, kNumAlignBits, 0xF);
-    }
-
     MatchFinder::Match matches[16];
 
     while (pos < (uint32_t)src_len) {
@@ -375,18 +361,6 @@ size_t lzma_compress(
             state.update_literal();
             pos++;
         }
-    }
-
-    /* End-of-stream marker: match with max distance 0xFFFFFFFF */
-    {
-        int ps = (int)(pos & (uint32_t)pos_mask);
-        rc.encode_bit(&pt->is_match[state.state][ps], 1);
-        rc.encode_bit(&pt->is_rep[state.state], 0);
-        encode_len(rc, pt->match_len, kMatchMinLen, ps);
-        rc.encode_bit_tree(pt->dist_slot[0], kNumPosSlotBits, 63);
-        int footerBits = (63 >> 1) - 1;  /* 30 */
-        rc.encode_direct_bits(0xFFFFFF, footerBits - kNumAlignBits);
-        rc.encode_bit_tree_reverse(pt->dist_align, kNumAlignBits, 0xF);
     }
 
     if (!rc.flush()) return 0;

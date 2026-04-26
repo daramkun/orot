@@ -42,6 +42,10 @@ static inline uint8_t* write_varint_extra(uint8_t* p, int extra) noexcept {
     return p;
 }
 
+static inline int varint_extra_size(int extra) noexcept {
+    return (extra / 255) + 1;
+}
+
 static inline int read_varint_extra(const uint8_t*& p, const uint8_t* end) noexcept {
     int sum = 0;
     while (p < end) {
@@ -87,8 +91,8 @@ static uint8_t* emit_sequence(
 
     /* Extra literal length */
     if (lit_nibble == 15) {
+        if (dst + varint_extra_size(lit_len - 15) > dst_end) return nullptr;
         dst = write_varint_extra(dst, lit_len - 15);
-        if (dst >= dst_end) return nullptr;
     }
 
     /* Literal bytes */
@@ -109,8 +113,8 @@ static uint8_t* emit_sequence(
 
     /* Extra match length */
     if (match_nibble == 15) {
+        if (dst + varint_extra_size(match_len - LZ4_MIN_MATCH - 15) > dst_end) return nullptr;
         dst = write_varint_extra(dst, match_len - LZ4_MIN_MATCH - 15);
-        if (dst >= dst_end) return nullptr;
     }
 
     return dst;
@@ -142,11 +146,14 @@ int lz4_block_compress(
     const uint8_t* anchor  = src;          /* start of current literal run */
     const uint8_t* ip      = src;          /* current input position */
     const uint8_t* ip_end  = src + src_len;
-    /* Last LZ4_LAST_LIT bytes must be literals */
-    const uint8_t* match_limit = ip_end - LZ4_LAST_LIT;
+    /* The last match must start at least 12 bytes before the end so the final
+     * sequence has the minimum 5 trailing literals required by the LZ4 block
+     * format and accepted by strict decoders such as liblz4. */
+    const uint8_t* match_limit = ip_end - LZ4_LAST_MATCH;
+    const uint8_t* match_end_limit = ip_end - LZ4_LAST_LIT;
 
     /* Must have at least LZ4_MIN_MATCH bytes to start matching */
-    if (src_len < LZ4_MIN_MATCH + LZ4_LAST_LIT) {
+    if (src_len < LZ4_MIN_MATCH + LZ4_LAST_MATCH) {
         /* Too small: emit as all literals */
         out = emit_sequence(out, dst_end, src, ip_end, 0, 0);
         return (out == nullptr) ? -1 : static_cast<int>(out - dst);
@@ -191,7 +198,7 @@ int lz4_block_compress(
             if (a != b) return false;
 
             /* Measure full match length */
-            int max_len = static_cast<int>(ip_end - ip);
+            int max_len = static_cast<int>(match_end_limit - ip);
             int ml = 4 + match_fn(ip + 4, ref + 4, max_len - 4);
 
             if (ml > best_len) {
@@ -287,6 +294,14 @@ int lz4_block_decompress(
     const uint8_t* src, int src_len,
     uint8_t* dst, int dst_cap) noexcept
 {
+    return lz4_block_decompress_with_prefix(src, src_len, dst, dst, dst_cap);
+}
+
+int lz4_block_decompress_with_prefix(
+    const uint8_t* src, int src_len,
+    uint8_t* prefix_base,
+    uint8_t* dst, int dst_cap) noexcept
+{
     const uint8_t* ip     = src;
     const uint8_t* ip_end = src + src_len;
     uint8_t*       op     = dst;
@@ -332,7 +347,7 @@ int lz4_block_decompress(
 
         /* Copy match */
         const uint8_t* ref = op - offset;
-        if (ref < dst) return -1;
+        if (ref < prefix_base) return -1;
         if (op + match_len > op_end) return -2;
 
         if (offset >= match_len) {
