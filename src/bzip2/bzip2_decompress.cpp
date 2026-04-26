@@ -2,6 +2,7 @@
 #include "bzip2_crc.hpp"
 #include "bzip2_huffman.hpp"
 
+#include <algorithm>
 #include <vector>
 #include <cstring>
 
@@ -54,6 +55,49 @@ struct BitReader {
 
 static constexpr uint32_t BZ2_BLOCK_MAX = 900001;
 
+static inline int decode_sym_hot(const HuffDecTable& ht, BitReader& br) {
+    if (br.buf_bits >= HUFF_FAST_BITS) {
+        uint32_t peek = (uint32_t)((br.buf >> (br.buf_bits - HUFF_FAST_BITS)) &
+                                   (HUFF_FAST_SIZE - 1));
+        const HuffDecTable::FastEntry& e = ht.fast_table[peek];
+        if (e.sym >= 0) {
+            br.buf_bits -= e.len;
+            return e.sym;
+        }
+
+        br.buf_bits -= HUFF_FAST_BITS;
+        uint32_t v = peek;
+        for (int l = HUFF_FAST_BITS + 1; l <= ht.max_len; ++l) {
+            if (br.buf_bits == 0) {
+                if (br.pos >= br.src_size) return -1;
+                br.buf = (br.buf << 8) | br.src[br.pos++];
+                br.buf_bits = 8;
+            }
+            --br.buf_bits;
+            v = (v << 1) | (uint32_t)((br.buf >> br.buf_bits) & 1);
+            if (ht.limit[l] == (uint32_t)-1) continue;
+            if (v <= ht.limit[l])
+                return ht.perm[ht.offset[l] + (int)(v - ht.base[l])];
+        }
+        return -1;
+    }
+
+    uint32_t v = 0;
+    for (int l = 1; l <= ht.max_len; ++l) {
+        if (br.buf_bits == 0) {
+            if (br.pos >= br.src_size) return -1;
+            br.buf = (br.buf << 8) | br.src[br.pos++];
+            br.buf_bits = 8;
+        }
+        --br.buf_bits;
+        v = (v << 1) | (uint32_t)((br.buf >> br.buf_bits) & 1);
+        if (ht.limit[l] == (uint32_t)-1) continue;
+        if (v <= ht.limit[l])
+            return ht.perm[ht.offset[l] + (int)(v - ht.base[l])];
+    }
+    return -1;
+}
+
 static inline void mtf_move_to_front(uint8_t* mtf_sym, uint8_t rank, uint8_t sym) {
     switch (rank) {
     case 0:
@@ -87,21 +131,54 @@ static inline void mtf_move_to_front(uint8_t* mtf_sym, uint8_t rank, uint8_t sym
     }
 }
 
+static inline void ibwt_prefetch_next(const uint32_t* tt, const uint8_t* ll, uint32_t next) {
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_prefetch(tt + next, 0, 1);
+    __builtin_prefetch(ll + next, 0, 1);
+#else
+    (void)tt; (void)ll; (void)next;
+#endif
+}
+
+static inline void repeat_store_hot(uint8_t* out, uint8_t byte, size_t cnt) {
+    if (cnt >= 64) {
+        std::memset(out, byte, cnt);
+        return;
+    }
+
+#if defined(DEFLATE_HAS_NEON)
+    const uint8x16_t v = vdupq_n_u8(byte);
+    while (cnt >= 16) {
+        vst1q_u8(out, v);
+        out += 16;
+        cnt -= 16;
+    }
+#elif defined(DEFLATE_HAS_SSE2)
+    const __m128i v = _mm_set1_epi8((char)byte);
+    while (cnt >= 16) {
+        _mm_storeu_si128((__m128i*)out, v);
+        out += 16;
+        cnt -= 16;
+    }
+#endif
+
+    while (cnt-- > 0) *out++ = byte;
+}
+
 /*
  * decode_block: fused Huffman+MTF decode → BWT pack → BWT walk+RLE1.
  *
  * Architecture (libbz2-inspired):
- *   Phase 1 — Huffman + MTF decode: decoded chars written to tt[] lower 8 bits,
+ *   Phase 1 — Huffman + MTF decode: decoded chars written to ll[],
  *              unzftab[] counts accumulated. No separate mtf_out buffer.
- *   Phase 2 — BWT pack: tt[cftab[char]] |= (i<<8). Char stays in low 8 bits.
- *   Phase 3 — Output walk: tt[tPos] gives (char | next<<8). CRC is verified once
- *              per decoded block after reconstruction, letting the hot decode loop
- *              keep memset-based run expansion branch-light.
+ *   Phase 2 — BWT pack: tt[f_pos] = source index, ll[] remains the L column.
+ *   Phase 3 — Output walk: tPos walks tt[], chars come from ll[].
  */
 static bool decode_block(BitReader& br,
                           uint8_t* dst, size_t dst_cap, size_t& written,
                           uint32_t* block_crc_out,
-                          std::vector<uint32_t>& tt)
+                          std::vector<uint32_t>& tt,
+                          std::vector<uint8_t>& ll)
 {
     /* Block CRC (32 bits) */
     uint32_t hi = br.read_bits(16);
@@ -145,7 +222,7 @@ static bool decode_block(BitReader& br,
     if (n_selectors == (uint32_t)-1) return false;
 
     /* Read selectors (MTF-coded, max 6 tables → unrolled shift is safe) */
-    std::vector<uint8_t> selectors(n_selectors);
+    uint8_t selectors[BZ_MAX_SELECTORS];
     {
         uint8_t order[BZ_MAX_TABLES];
         for (uint32_t t = 0; t < n_tables; ++t) order[t] = (uint8_t)t;
@@ -186,9 +263,10 @@ static bool decode_block(BitReader& br,
         dec_tables[t].build_from_lengths(lens, alpha_size);
     }
 
-    /* ── Phase 1: Huffman + MTF → tt[] ─────────────────────────────────────── */
+    /* ── Phase 1: Huffman + MTF → ll[] ─────────────────────────────────────── */
 
     uint32_t* tt_data = tt.data();  /* already sized BZ2_BLOCK_MAX by caller */
+    uint8_t* ll_data = ll.data();   /* already sized BZ2_BLOCK_MAX by caller */
 
     /* MTF list — actual byte values, index == rank */
     uint8_t mtf_sym[256];
@@ -197,21 +275,21 @@ static bool decode_block(BitReader& br,
     uint32_t unzftab[256] = {};
     uint32_t nblock = 0;
     const int EOB = alpha_size - 1;
-    uint32_t g = 0, g_cnt = 0;
-    uint8_t cur_tbl = selectors[0];
+    uint32_t g = 0;
+    uint32_t g_rem = BZ_G_SIZE;
+    const HuffDecTable* cur_ht = &dec_tables[selectors[0]];
     uint32_t run = 0, run_mul = 1;
 
     while (true) {
-        if (g_cnt == BZ_G_SIZE) {
-            g_cnt = 0;
+        if (g_rem == 0) {
             ++g;
             if (g >= n_selectors) return false;
-            cur_tbl = selectors[g];
+            cur_ht = &dec_tables[selectors[g]];
+            g_rem = BZ_G_SIZE;
         }
         br.refill();
-        int sym = dec_tables[cur_tbl].decode_sym(
-            br.buf, br.buf_bits, br.src, br.src_size, br.pos);
-        ++g_cnt;
+        int sym = decode_sym_hot(*cur_ht, br);
+        --g_rem;
         if (sym < 0) return false;
 
         if (sym == BZ_RUNA) { run += run_mul;     run_mul <<= 1; continue; }
@@ -221,7 +299,7 @@ static bool decode_block(BitReader& br,
         if (run > 0) {
             if (nblock + run > BZ2_BLOCK_MAX) return false;
             uint8_t uc = mtf_sym[0];
-            for (uint32_t r = 0; r < run; r++) tt_data[nblock + r] = (uint32_t)uc;
+            std::fill_n(ll_data + nblock, run, uc);
             unzftab[uc] += run;
             nblock += run;
             run = 0; run_mul = 1;
@@ -236,13 +314,13 @@ static bool decode_block(BitReader& br,
         mtf_move_to_front(mtf_sym, rank, uc);
 
         if (nblock >= BZ2_BLOCK_MAX) return false;
-        tt_data[nblock++] = (uint32_t)uc;
+        ll_data[nblock++] = uc;
         unzftab[uc]++;
     }
 
     if (primary >= nblock) return false;
 
-    /* ── Phase 2: BWT pack — char stays in low 8 bits, source-index in [8..31] */
+    /* ── Phase 2: BWT pack — tt[f_pos] = source index, ll[] keeps chars */
 
     uint32_t cftab[257] = {};
     for (int i = 1; i <= 256; i++) cftab[i] = unzftab[i-1];
@@ -250,42 +328,58 @@ static bool decode_block(BitReader& br,
     for (int i = 0; i <= 256; i++) if (cftab[i] > nblock) return false;
 
     for (uint32_t i = 0; i < nblock; i++) {
-        uint8_t uc = (uint8_t)(tt_data[i] & 0xFF);
-        tt_data[cftab[uc]] |= ((uint32_t)i << 8);
+        uint8_t uc = ll_data[i];
+        tt_data[cftab[uc]] = i;
         cftab[uc]++;
     }
 
     /* ── Phase 3: BWT walk + RLE1 ───────────────────────────────────────────── */
 
     /* Restore all hot state to locals (encourages register allocation) */
-    size_t   c_outpos = written;
+    uint8_t* out = dst + written;
+    uint8_t* const out_end = dst + dst_cap;
+    uint8_t* const block_begin = out;
     uint8_t  c_run_ch = 0;
     int      c_run_cnt = 0;
-    uint32_t c_tPos   = tt_data[primary] >> 8;
+    uint32_t c_tPos   = tt_data[primary];
     uint32_t c_nb     = 0;
+    uint32_t c_crc    = 0xFFFFFFFFu;
+    size_t   c_run_extra = 0;
+    static constexpr size_t CRC_DEFER_RUN_THRESHOLD = 512;
 
     while (c_nb < nblock) {
-        uint32_t packed = tt_data[c_tPos];
-        uint8_t c = (uint8_t)(packed & 0xFF);
-        c_tPos = packed >> 8;
+        uint32_t idx = c_tPos;
+        uint8_t c = ll_data[idx];
+        c_tPos = tt_data[idx];
         c_nb++;
+        ibwt_prefetch_next(tt_data, ll_data, c_tPos);
 
-        if (c_outpos >= dst_cap) return false;
-        dst[c_outpos++] = c;
+        if (out >= out_end) return false;
+        *out++ = c;
+        c_crc = crc32_update(c_crc, c);
 
         if (c == c_run_ch) {
             c_run_cnt++;
             if (c_run_cnt == 4) {
                 /* Consume run-length count byte from BWT walk */
                 if (c_nb >= nblock) return false;
-                packed = tt_data[c_tPos];
-                uint32_t cnt = packed & 0xFF;
-                c_tPos = packed >> 8;
+                uint32_t idx2 = c_tPos;
+                uint32_t cnt = ll_data[idx2];
+                c_tPos = tt_data[idx2];
                 c_nb++;
 
-                if (c_outpos + cnt > dst_cap) return false;
-                memset(dst + c_outpos, c_run_ch, cnt);
-                c_outpos += cnt;
+                if ((size_t)(out_end - out) < cnt) return false;
+                repeat_store_hot(out, c_run_ch, cnt);
+                c_run_extra += cnt;
+                size_t block_out = (size_t)(out - block_begin) + cnt;
+                if (c_run_extra >= CRC_DEFER_RUN_THRESHOLD &&
+                    c_run_extra * 2 >= block_out) {
+                    out += cnt;
+                    c_run_cnt = 0;
+                    goto phase3_deferred;
+                }
+                c_crc = crc32_update_repeat(c_crc, c_run_ch, cnt);
+                out += cnt;
                 c_run_cnt = 0;
             }
         } else {
@@ -294,9 +388,45 @@ static bool decode_block(BitReader& br,
         }
     }
 
-    uint32_t c_crc = crc32_block(dst + written, c_outpos - written);
+    c_crc ^= 0xFFFFFFFFu;
+    goto phase3_done;
+
+phase3_deferred:
+    while (c_nb < nblock) {
+        uint32_t idx = c_tPos;
+        uint8_t c = ll_data[idx];
+        c_tPos = tt_data[idx];
+        c_nb++;
+        ibwt_prefetch_next(tt_data, ll_data, c_tPos);
+
+        if (out >= out_end) return false;
+        *out++ = c;
+
+        if (c == c_run_ch) {
+            c_run_cnt++;
+            if (c_run_cnt == 4) {
+                if (c_nb >= nblock) return false;
+                uint32_t idx2 = c_tPos;
+                uint32_t cnt = ll_data[idx2];
+                c_tPos = tt_data[idx2];
+                c_nb++;
+
+                if ((size_t)(out_end - out) < cnt) return false;
+                repeat_store_hot(out, c_run_ch, cnt);
+                out += cnt;
+                c_run_cnt = 0;
+            }
+        } else {
+            c_run_ch  = c;
+            c_run_cnt = 1;
+        }
+    }
+
+    c_crc = crc32_block(block_begin, (size_t)(out - block_begin));
+
+phase3_done:
     if (c_crc != *block_crc_out) return false;
-    written = c_outpos;
+    written = (size_t)(out - dst);
     return true;
 }
 
@@ -317,6 +447,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
     size_t written = 0;
     uint32_t combined_crc = 0;
     std::vector<uint32_t> tt(BZ2_BLOCK_MAX);  /* sized once, reused across blocks */
+    std::vector<uint8_t> ll(BZ2_BLOCK_MAX);   /* sized once, reused across blocks */
 
     while (true) {
         uint32_t m0 = br.read_bits(16);
@@ -336,7 +467,7 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
         if (m0 != 0x3141 || m1 != 0x5926 || m2 != 0x5359) return 0;
 
         uint32_t block_crc = 0;
-        if (!decode_block(br, dst, dst_cap, written, &block_crc, tt))
+        if (!decode_block(br, dst, dst_cap, written, &block_crc, tt, ll))
             return 0;
         combined_crc = crc32_combine(combined_crc, block_crc);
     }
