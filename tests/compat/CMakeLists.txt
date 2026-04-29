@@ -37,6 +37,16 @@ find_path(LIBZSTD_INCLUDE_DIR zstd.h
       HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
       PATH_SUFFIXES include)
 
+find_library(LIBBROTLI_DEC_LIB brotlidec
+      HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+      PATH_SUFFIXES lib)
+find_library(LIBBROTLI_COMMON_LIB brotlicommon
+      HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+      PATH_SUFFIXES lib)
+find_path(LIBBROTLI_INCLUDE_DIR brotli/decode.h
+      HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
+      PATH_SUFFIXES include)
+
 if(LZ4_LIB AND LZ4_INCLUDE_DIR AND
    LIBLZMA_LIB AND LIBLZMA_INCLUDE_DIR AND
    LIBBZ2_LIB AND LIBBZ2_INCLUDE_DIR AND
@@ -61,4 +71,22 @@ if(LZ4_LIB AND LZ4_INCLUDE_DIR AND
   message(STATUS "LZ4/LZMA/Bzip2/Zstandard: cross-library compatibility tests enabled")
 else()
   message(STATUS "LZ4/LZMA/Bzip2/Zstandard: skipping compat tests (external libs not found)")
+endif()
+
+if(LIBBROTLI_DEC_LIB AND LIBBROTLI_COMMON_LIB AND LIBBROTLI_INCLUDE_DIR)
+  add_executable(test_brotli_compat test_brotli_compat.cpp)
+  target_link_libraries(test_brotli_compat PRIVATE
+      orot
+      ${LIBBROTLI_DEC_LIB}
+      ${LIBBROTLI_COMMON_LIB}
+  )
+  target_include_directories(test_brotli_compat PRIVATE
+      ${CMAKE_SOURCE_DIR}/include
+      ${LIBBROTLI_INCLUDE_DIR}
+  )
+  target_compile_options(test_brotli_compat PRIVATE -O2)
+  add_test(NAME test_brotli_compat COMMAND test_brotli_compat)
+  message(STATUS "Brotli: uncompressed-stream compatibility tests enabled")
+else()
+  message(STATUS "Brotli: skipping compat tests (libbrotlidec not found)")
 endif()

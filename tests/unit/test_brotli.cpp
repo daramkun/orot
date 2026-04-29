@@ -1,5 +1,5 @@
 /*
- * Brotli API scaffold tests.
+ * Brotli uncompressed stream tests.
  */
 #include <cstdio>
 #include <cstring>
@@ -28,7 +28,8 @@ int main() {
                                  out.data(), out.size(),
                                  OROT_BROTLI_QUALITY_DEFAULT,
                                  OROT_BROTLI_LGWIN_DEFAULT);
-    CHECK(n == -4, "compress reports not implemented");
+    CHECK(n > 0, "compress uncompressed meta-block stream");
+    const int clen = n;
 
     n = orot_brotli_compress(text, len,
                              out.data(), out.size(),
@@ -49,29 +50,56 @@ int main() {
                              OROT_BROTLI_LGWIN_DEFAULT);
     CHECK(n == -2, "small output buffer rejected");
 
-    size_t actual = 123;
-    n = orot_brotli_decompress(text, len,
-                               out.data(), out.size(),
+    std::vector<uint8_t> decompressed(len + 16, 0);
+    size_t actual = 0;
+    n = orot_brotli_decompress(out.data(), (size_t)clen,
+                               decompressed.data(), decompressed.size(),
                                &actual);
-    CHECK(n == -4, "decompress reports not implemented");
-    CHECK(actual == 123, "decompress does not update size on failure");
+    CHECK(n == (int)len, "decompress uncompressed meta-block stream");
+    CHECK(actual == len, "decompress reports actual size");
+    CHECK(std::memcmp(text, decompressed.data(), len) == 0, "roundtrip bytes match");
+
+    n = orot_brotli_decompress(out.data(), (size_t)clen,
+                               tiny.data(), tiny.size(),
+                               nullptr);
+    CHECK(n == -2, "decompress reports small output buffer");
+
+    uint8_t bad[] = {0xFF, 0xFF};
+    n = orot_brotli_decompress(bad, sizeof(bad),
+                               decompressed.data(), decompressed.size(),
+                               nullptr);
+    CHECK(n == -3, "decompress rejects malformed stream");
+
+    std::vector<uint8_t> empty_compressed(orot_brotli_compress_bound(0));
+    n = orot_brotli_compress(nullptr, 0,
+                             empty_compressed.data(), empty_compressed.size(),
+                             OROT_BROTLI_QUALITY_DEFAULT,
+                             OROT_BROTLI_LGWIN_DEFAULT);
+    CHECK(n > 0, "compress empty stream");
+    actual = 999;
+    int dlen = orot_brotli_decompress(empty_compressed.data(), (size_t)n,
+                                      decompressed.data(), decompressed.size(),
+                                      &actual);
+    CHECK(dlen == 0, "decompress empty stream");
+    CHECK(actual == 0, "empty stream actual size");
 
     auto cpp_compressed = orot::brotli_api::compress(
         std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(text), len));
-    CHECK(cpp_compressed.empty(), "C++ compress wrapper returns empty on failure");
+    CHECK(!cpp_compressed.empty(), "C++ compress wrapper returns data");
 
     auto cpp_decompressed = orot::brotli_api::decompress(
-        std::span<const uint8_t>(
-            reinterpret_cast<const uint8_t*>(text), len),
+        std::span<const uint8_t>(cpp_compressed.data(), cpp_compressed.size()),
         256);
-    CHECK(cpp_decompressed.empty(), "C++ decompress wrapper returns empty on failure");
+    CHECK(cpp_decompressed.size() == len, "C++ decompress wrapper returns data");
+    CHECK(std::memcmp(text, cpp_decompressed.data(), len) == 0,
+          "C++ wrapper roundtrip bytes match");
 
     if (failures == 0) {
-        std::printf("All Brotli scaffold tests passed.\n");
+        std::printf("All Brotli uncompressed stream tests passed.\n");
         return 0;
     }
 
-    std::fprintf(stderr, "%d Brotli scaffold test(s) failed.\n", failures);
+    std::fprintf(stderr, "%d Brotli uncompressed stream test(s) failed.\n", failures);
     return 1;
 }

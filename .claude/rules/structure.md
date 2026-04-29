@@ -12,7 +12,7 @@ orot/
 │   ├── lzma.h              # LZMA/LZMA2 C/C++ API
 │   ├── bzip2.h             # Bzip2 C/C++ API
 │   ├── zstd.h              # Zstandard C API (whole-buffer, dictionary, buffered streaming)
-│   └── brotli.h            # Brotli C/C++ API 스캐폴드
+│   └── brotli.h            # Brotli C/C++ API (uncompressed meta-block 지원)
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -53,9 +53,10 @@ orot/
 │   │   ├── fse.{cpp,hpp}   # FSE normalized count/table + reverse bitstream decoder
 │   │   ├── huf.{cpp,hpp}   # zstd literal Huffman table/stream decoder
 │   │   └── zstd.cpp        # frame/block parser + raw/RLE/compressed 압축해제 + XXH64 checksum
-│   ├── brotli/             # Brotli 구현 스캐폴드
-│   │   ├── brotli_compress.{cpp,hpp}   # Brotli 압축 모듈 경계
-│   │   └── brotli_decompress.{cpp,hpp} # Brotli 압축해제 모듈 경계
+│   ├── brotli/             # Brotli 구현
+│   │   ├── brotli_bit.hpp             # Brotli LSB-first bit reader/writer
+│   │   ├── brotli_compress.{cpp,hpp}  # uncompressed meta-block encoder
+│   │   └── brotli_decompress.{cpp,hpp} # stream/meta-block parser + uncompressed decoder
 │   ├── api/                # C API 진입점
 │   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
@@ -100,7 +101,7 @@ orot/
 │   │   ├── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
 │   │   ├── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
 │   │   ├── test_zstd.cpp             # Zstandard frame/block/compressed sample + dictionary/streaming + 에러 경로
-│   │   └── test_brotli.cpp           # Brotli API 스캐폴드 + 미구현 에러 계약
+│   │   └── test_brotli.cpp           # Brotli uncompressed stream 라운드트립 + 에러 경로
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
@@ -116,7 +117,8 @@ orot/
 │   │   └── bench_brotli_compare.cpp  # Brotli 비교 벤치 스캐폴드 (→ bench_brotli_compare)
 │   ├── compat/
 │   │   ├── test_compat.cpp       # DEFLATE 교차 라이브러리 호환성 (zlib/libdeflate, 126 케이스)
-│   │   └── test_codec_compat.cpp # LZ4/LZMA/LZMA2/Bzip2/Zstandard 교차 라이브러리 호환성
+│   │   ├── test_codec_compat.cpp # LZ4/LZMA/LZMA2/Bzip2/Zstandard 교차 라이브러리 호환성
+│   │   └── test_brotli_compat.cpp # Brotli uncompressed stream libbrotlidec 호환성
 │   └── fuzz/
 │       ├── fuzz_roundtrip.cpp   # libfuzzer compress+decompress
 │       ├── fuzz_decompress.cpp  # libfuzzer decompress only

@@ -1,15 +1,15 @@
 /*
- * bench_brotli.cpp - Brotli scaffold benchmark placeholder.
+ * bench_brotli.cpp - Brotli benchmark placeholder.
  *
- * The Brotli encoder/decoder implementation is not present yet. This target is
- * registered so the benchmark surface exists from the first integration step.
+ * Full compressed-block Brotli is not implemented yet. This target remains a
+ * placeholder until the encoder/decoder are ready for throughput comparisons.
  */
 #include <cstdio>
 
 #include "orot/brotli.h"
 
 int main() {
-    std::printf("Brotli benchmark placeholder: implementation pending.\n");
+    std::printf("Brotli benchmark placeholder: compressed implementation pending.\n");
     std::printf("default quality=%d lgwin=%d\n",
                 OROT_BROTLI_QUALITY_DEFAULT,
                 OROT_BROTLI_LGWIN_DEFAULT);

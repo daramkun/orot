@@ -10,14 +10,16 @@ extern "C" {
 /**
  * orot Brotli API
  *
- * Brotli stream support scaffold. The public API is available so callers can
- * compile against it while the encoder/decoder implementation is filled in.
+ * Current implementation supports Brotli streams composed of uncompressed
+ * meta-blocks. The decoder parses stream headers, meta-block headers,
+ * metadata blocks, and uncompressed meta-blocks. Compressed meta-block
+ * decoding is added in a later step.
  *
  * Return convention: non-negative = byte count written; negative = error.
  *   -1: general error (bad parameter, null pointer)
  *   -2: output buffer too small
  *   -3: data error (malformed input on decompress)
- *   -4: feature not implemented yet
+ *   -4: compressed meta-block support not implemented yet
  *
  * Compression quality: 0 (fastest) ... 11 (best compression)
  * Window size lgwin: 10 ... 24

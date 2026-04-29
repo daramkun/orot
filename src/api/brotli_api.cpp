@@ -29,7 +29,7 @@ int orot_brotli_compress(
         static_cast<uint8_t*>(dst), dst_cap,
         quality, lgwin);
 
-    if (n == 0) return -4;
+    if (n == 0) return -1;
     if (n > (size_t)INT_MAX) return -1;
     return (int)n;
 }
@@ -43,11 +43,23 @@ int orot_brotli_decompress(
     if (src_size == 0) return -3;
     if (!dst) return -1;
 
-    size_t n = brotli_decompress(
+    size_t n = 0;
+    BrotliDecodeStatus status = brotli_decompress(
         static_cast<const uint8_t*>(src), src_size,
-        static_cast<uint8_t*>(dst), dst_cap);
+        static_cast<uint8_t*>(dst), dst_cap,
+        &n);
 
-    if (n == 0) return -4;
+    switch (status) {
+    case BrotliDecodeStatus::Ok:
+        break;
+    case BrotliDecodeStatus::NeedOutput:
+        return -2;
+    case BrotliDecodeStatus::DataError:
+        return -3;
+    case BrotliDecodeStatus::Unsupported:
+        return -4;
+    }
+
     if (n > (size_t)INT_MAX) return -1;
 
     if (uncompressed_size_out) *uncompressed_size_out = n;
