@@ -1,5 +1,4 @@
 #include "brotli_meta.hpp"
-#include "brotli_huffman.hpp"
 
 namespace orot { namespace brotli {
 
@@ -116,6 +115,113 @@ bool read_context_map(
         inverse_mtf(out);
 
     return true;
+}
+
+static bool read_block_category_header(
+    BitReader& br,
+    BlockCategoryHeader& out) noexcept
+{
+    int num_types = read_var_len_uint8_plus_one(br);
+    if (num_types <= 0 || num_types > 256)
+        return false;
+
+    out = BlockCategoryHeader{};
+    out.num_types = num_types;
+    if (num_types < 2)
+        return true;
+
+    if (!read_prefix_code(br, num_types + 2, out.type_code))
+        return false;
+    if (!read_prefix_code(br, 26, out.count_code))
+        return false;
+
+    int block_count_code = out.count_code.decode(br);
+    if (block_count_code < 0 || br.error)
+        return false;
+    int block_count = read_block_count(br, block_count_code);
+    if (block_count <= 0)
+        return false;
+
+    out.block_count = block_count;
+    return true;
+}
+
+static bool read_prefix_code_array(
+    BitReader& br,
+    int count,
+    int alphabet_size,
+    std::vector<PrefixCode>& out) noexcept
+{
+    if (count <= 0 || alphabet_size <= 0 || alphabet_size > PrefixCode::kMaxEntries)
+        return false;
+
+    out.clear();
+    out.resize(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        if (!read_prefix_code(br, alphabet_size, out[static_cast<size_t>(i)]))
+            return false;
+    }
+    return true;
+}
+
+bool read_compressed_meta_block_header(
+    BitReader& br,
+    CompressedMetaBlockHeader& out) noexcept
+{
+    out = CompressedMetaBlockHeader{};
+
+    for (BlockCategoryHeader& category : out.block_categories) {
+        if (!read_block_category_header(br, category))
+            return false;
+    }
+
+    out.npostfix = static_cast<int>(br.read_bits(2));
+    uint32_t ndirect_msb = br.read_bits(4);
+    if (br.error)
+        return false;
+    out.ndirect = static_cast<int>(ndirect_msb << out.npostfix);
+
+    const int num_literal_block_types = out.block_categories[0].num_types;
+    out.literal_context_modes.resize(static_cast<size_t>(num_literal_block_types));
+    for (int i = 0; i < num_literal_block_types; ++i) {
+        out.literal_context_modes[static_cast<size_t>(i)] =
+            static_cast<uint8_t>(br.read_bits(2));
+        if (br.error)
+            return false;
+    }
+
+    int num_literal_trees = read_var_len_uint8_plus_one(br);
+    if (num_literal_trees <= 0 || num_literal_trees > 256)
+        return false;
+    int literal_context_map_size = 64 * num_literal_block_types;
+    if (num_literal_trees >= 2) {
+        if (!read_context_map(br, literal_context_map_size, num_literal_trees,
+                              out.literal_context_map))
+            return false;
+    } else {
+        out.literal_context_map.assign(
+            static_cast<size_t>(literal_context_map_size), 0);
+    }
+
+    int num_distance_trees = read_var_len_uint8_plus_one(br);
+    if (num_distance_trees <= 0 || num_distance_trees > 256)
+        return false;
+    int distance_context_map_size = 4 * out.block_categories[2].num_types;
+    if (num_distance_trees >= 2) {
+        if (!read_context_map(br, distance_context_map_size, num_distance_trees,
+                              out.distance_context_map))
+            return false;
+    } else {
+        out.distance_context_map.assign(
+            static_cast<size_t>(distance_context_map_size), 0);
+    }
+
+    const int distance_alphabet_size = 16 + out.ndirect + (48 << out.npostfix);
+    return read_prefix_code_array(br, num_literal_trees, 256, out.literal_trees)
+        && read_prefix_code_array(br, out.block_categories[1].num_types, 704,
+                                  out.command_trees)
+        && read_prefix_code_array(br, num_distance_trees, distance_alphabet_size,
+                                  out.distance_trees);
 }
 
 } } /* namespace orot::brotli */

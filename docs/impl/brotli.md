@@ -15,6 +15,7 @@
 | simple prefix code parser/decoder | ✅ |
 | complex prefix code parser/decoder | ✅ |
 | compressed meta-block helper parsers (varlen/block count/context map) | ✅ |
+| compressed meta-block header parser 연결 | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -67,9 +68,8 @@ int orot_brotli_decompress(
 
 ## 다음 단계
 
-1. compressed meta-block header state 연결
-2. command/literal/distance decoder 구현
-3. Google Brotli encoder가 만든 compressed stream 해제 호환성 추가
-4. minimal compressed encoder 구현
-5. static dictionary 지원 추가
-6. 퍼즈 테스트 추가
+1. compressed meta-block command/literal/distance decoder 구현
+2. Google Brotli encoder가 만든 compressed stream 해제 호환성 추가
+3. minimal compressed encoder 구현
+4. static dictionary 지원 추가
+5. 퍼즈 테스트 추가

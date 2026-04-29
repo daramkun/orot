@@ -1,6 +1,7 @@
 #include "brotli_decompress.hpp"
 #include "brotli_bit.hpp"
 #include "brotli_compress.hpp"
+#include "brotli_meta.hpp"
 
 #include <cstring>
 
@@ -109,6 +110,9 @@ BrotliDecodeStatus brotli_decompress(
             }
         }
 
+        CompressedMetaBlockHeader header;
+        if (!read_compressed_meta_block_header(br, header) || br.error)
+            return BrotliDecodeStatus::DataError;
         return BrotliDecodeStatus::Unsupported;
     }
 }

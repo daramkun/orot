@@ -1,5 +1,5 @@
 /*
- * Brotli uncompressed stream tests.
+ * Brotli stream and parser tests.
  */
 #include <cstdio>
 #include <cstring>
@@ -18,6 +18,26 @@ static int failures = 0;
         ++failures; \
     } \
 } while (0)
+
+static int brotli_alphabet_bits(int alphabet_size) {
+    int bits = 0;
+    int limit = 1;
+    while (limit < alphabet_size) {
+        limit <<= 1;
+        ++bits;
+    }
+    return bits;
+}
+
+static bool write_single_symbol_prefix(
+    orot::brotli::BitWriter& bw,
+    int alphabet_size,
+    uint32_t symbol)
+{
+    return bw.write_bits(1, 2)
+        && bw.write_bits(0, 2)
+        && bw.write_bits(symbol, brotli_alphabet_bits(alphabet_size));
+}
 
 static void test_simple_prefix_code() {
     uint8_t storage[16] = {};
@@ -150,10 +170,51 @@ static void test_meta_helpers() {
           "context map entries");
 }
 
+static void test_compressed_meta_block_header() {
+    uint8_t storage[64] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0, 1), "one literal block type");
+    CHECK(bw.write_bits(0, 1), "one command block type");
+    CHECK(bw.write_bits(0, 1), "one distance block type");
+    CHECK(bw.write_bits(0, 2), "npostfix zero");
+    CHECK(bw.write_bits(0, 4), "ndirect zero");
+    CHECK(bw.write_bits(0, 2), "literal context mode zero");
+    CHECK(bw.write_bits(0, 1), "one literal tree");
+    CHECK(bw.write_bits(0, 1), "one distance tree");
+    CHECK(write_single_symbol_prefix(bw, 256, 0), "literal tree");
+    CHECK(write_single_symbol_prefix(bw, 704, 0), "command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 0), "distance tree");
+    CHECK(bw.finish_zero(), "finish compressed meta-block header");
+
+    orot::brotli::BitReader br;
+    br.init(storage, bw.bytes_written(storage));
+
+    orot::brotli::CompressedMetaBlockHeader header;
+    CHECK(orot::brotli::read_compressed_meta_block_header(br, header),
+          "read compressed meta-block header");
+    CHECK(header.block_categories[0].num_types == 1, "literal block type count");
+    CHECK(header.block_categories[1].num_types == 1, "command block type count");
+    CHECK(header.block_categories[2].num_types == 1, "distance block type count");
+    CHECK(header.npostfix == 0 && header.ndirect == 0, "distance parameters");
+    CHECK(header.literal_context_modes.size() == 1 &&
+          header.literal_context_modes[0] == 0,
+          "literal context mode");
+    CHECK(header.literal_context_map.size() == 64, "literal context map size");
+    CHECK(header.distance_context_map.size() == 4, "distance context map size");
+    CHECK(header.literal_trees.size() == 1, "literal tree count");
+    CHECK(header.command_trees.size() == 1, "command tree count");
+    CHECK(header.distance_trees.size() == 1, "distance tree count");
+    CHECK(header.literal_trees[0].decode(br) == 0,
+          "single literal tree decodes without bits");
+}
+
 int main() {
     test_simple_prefix_code();
     test_complex_prefix_code();
     test_meta_helpers();
+    test_compressed_meta_block_header();
 
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);
@@ -208,6 +269,31 @@ int main() {
                                nullptr);
     CHECK(n == -3, "decompress rejects malformed stream");
 
+    uint8_t truncated_compressed[8] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(truncated_compressed, sizeof(truncated_compressed));
+    CHECK(bw.write_bits(0b1011, 4), "compressed test wbits 22");
+    CHECK(bw.write_bits(0, 1), "compressed test non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "compressed test mnibbles");
+    CHECK(bw.write_bits(0, 16), "compressed test meta length one");
+    CHECK(bw.write_bits(0, 1), "compressed test is compressed");
+    CHECK(bw.finish_zero(), "finish truncated compressed stream");
+    n = orot_brotli_decompress(truncated_compressed,
+                               bw.bytes_written(truncated_compressed),
+                               decompressed.data(), decompressed.size(),
+                               nullptr);
+    CHECK(n == -3, "truncated compressed meta-block header is malformed");
+
+    const uint8_t brotli_cli_compressed[] = {
+        0x1f, 0x16, 0x00, 0x00, 0x24, 0x40, 0x6a,
+        0x10, 0x65, 0xea, 0xf0, 0x9c, 0x3e
+    };
+    n = orot_brotli_decompress(brotli_cli_compressed,
+                               sizeof(brotli_cli_compressed),
+                               decompressed.data(), decompressed.size(),
+                               nullptr);
+    CHECK(n == -4, "valid compressed meta-block reaches unsupported body decoder");
+
     std::vector<uint8_t> empty_compressed(orot_brotli_compress_bound(0));
     n = orot_brotli_compress(nullptr, 0,
                              empty_compressed.data(), empty_compressed.size(),
@@ -234,10 +320,10 @@ int main() {
           "C++ wrapper roundtrip bytes match");
 
     if (failures == 0) {
-        std::printf("All Brotli uncompressed stream tests passed.\n");
+        std::printf("All Brotli stream and parser tests passed.\n");
         return 0;
     }
 
-    std::fprintf(stderr, "%d Brotli uncompressed stream test(s) failed.\n", failures);
+    std::fprintf(stderr, "%d Brotli stream/parser test(s) failed.\n", failures);
     return 1;
 }
