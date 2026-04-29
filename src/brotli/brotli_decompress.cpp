@@ -161,6 +161,50 @@ static void push_distance(int distance, int last_distances[4]) noexcept {
     last_distances[0] = distance;
 }
 
+struct BlockState {
+    const BlockCategoryHeader* header = nullptr;
+    int type = 0;
+    int remaining = 16777216;
+
+    void init(const BlockCategoryHeader& h) noexcept {
+        header = &h;
+        type = 0;
+        remaining = h.block_count;
+    }
+
+    bool advance(BitReader& br) noexcept {
+        if (!header)
+            return false;
+        if (remaining > 0) {
+            --remaining;
+            return true;
+        }
+        if (header->num_types < 2)
+            return false;
+
+        int symbol = header->type_code.decode(br);
+        if (symbol < 0 || br.error)
+            return false;
+        if (symbol == 0)
+            type = (type + 1) % header->num_types;
+        else if (symbol == 1)
+            type = (type + 2) % header->num_types;
+        else if (symbol - 2 < header->num_types)
+            type = symbol - 2;
+        else
+            return false;
+
+        int count_code = header->count_code.decode(br);
+        if (count_code < 0 || br.error)
+            return false;
+        int count = read_block_count(br, count_code);
+        if (count <= 0)
+            return false;
+        remaining = count - 1;
+        return true;
+    }
+};
+
 static BrotliDecodeStatus decode_compressed_meta_block(
     BitReader& br,
     const CompressedMetaBlockHeader& header,
@@ -172,19 +216,29 @@ static BrotliDecodeStatus decode_compressed_meta_block(
 {
     (void)wbits;
 
-    if (header.block_categories[0].num_types != 1 ||
-        header.block_categories[1].num_types != 1 ||
-        header.block_categories[2].num_types != 1 ||
-        header.literal_trees.size() != 1 ||
-        header.command_trees.size() != 1 ||
-        header.distance_trees.size() != 1)
+    if (header.command_trees.empty() ||
+        header.literal_trees.empty() ||
+        header.distance_trees.empty())
         return BrotliDecodeStatus::Unsupported;
 
     size_t produced = 0;
     int last_distances[4] = {4, 11, 15, 16};
+    BlockState literal_block;
+    BlockState command_block;
+    BlockState distance_block;
+    literal_block.init(header.block_categories[0]);
+    command_block.init(header.block_categories[1]);
+    distance_block.init(header.block_categories[2]);
 
     while (produced < meta_len) {
-        int command_symbol = header.command_trees[0].decode(br);
+        if (!command_block.advance(br))
+            return BrotliDecodeStatus::DataError;
+        if (command_block.type < 0 ||
+            static_cast<size_t>(command_block.type) >= header.command_trees.size())
+            return BrotliDecodeStatus::DataError;
+
+        int command_symbol =
+            header.command_trees[static_cast<size_t>(command_block.type)].decode(br);
         if (command_symbol < 0 || br.error)
             return BrotliDecodeStatus::DataError;
 
@@ -198,7 +252,21 @@ static BrotliDecodeStatus decode_compressed_meta_block(
             return BrotliDecodeStatus::NeedOutput;
 
         for (int i = 0; i < lengths.insert_len; ++i) {
-            int literal = header.literal_trees[0].decode(br);
+            if (!literal_block.advance(br))
+                return BrotliDecodeStatus::DataError;
+            int literal_tree_index = literal_block.type;
+            if (!header.literal_context_map.empty()) {
+                size_t map_index = static_cast<size_t>(literal_block.type) * 64u;
+                if (map_index >= header.literal_context_map.size())
+                    return BrotliDecodeStatus::DataError;
+                literal_tree_index = header.literal_context_map[map_index];
+            }
+            if (literal_tree_index < 0 ||
+                static_cast<size_t>(literal_tree_index) >= header.literal_trees.size())
+                return BrotliDecodeStatus::DataError;
+
+            int literal =
+                header.literal_trees[static_cast<size_t>(literal_tree_index)].decode(br);
             if (literal < 0 || literal > 255 || br.error)
                 return BrotliDecodeStatus::DataError;
             dst[out_pos++] = static_cast<uint8_t>(literal);
@@ -214,7 +282,21 @@ static BrotliDecodeStatus decode_compressed_meta_block(
         int distance = last_distances[0];
         bool should_push_distance = false;
         if (!lengths.implicit_distance) {
-            int distance_code = header.distance_trees[0].decode(br);
+            if (!distance_block.advance(br))
+                return BrotliDecodeStatus::DataError;
+            int distance_tree_index = distance_block.type;
+            if (!header.distance_context_map.empty()) {
+                size_t map_index = static_cast<size_t>(distance_block.type) * 4u;
+                if (map_index >= header.distance_context_map.size())
+                    return BrotliDecodeStatus::DataError;
+                distance_tree_index = header.distance_context_map[map_index];
+            }
+            if (distance_tree_index < 0 ||
+                static_cast<size_t>(distance_tree_index) >= header.distance_trees.size())
+                return BrotliDecodeStatus::DataError;
+
+            int distance_code =
+                header.distance_trees[static_cast<size_t>(distance_tree_index)].decode(br);
             if (distance_code < 0 || br.error)
                 return BrotliDecodeStatus::DataError;
             if (!compute_distance(distance_code, br, header.ndirect,

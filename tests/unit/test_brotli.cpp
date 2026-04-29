@@ -46,6 +46,44 @@ static bool write_prefix_bits(orot::brotli::BitWriter& bw, uint32_t code, int le
     return bw.write_bits(reversed, len);
 }
 
+static bool write_varlen_uint8_plus_one(
+    orot::brotli::BitWriter& bw,
+    uint32_t value)
+{
+    if (value == 1)
+        return bw.write_bits(0, 1);
+    if (value == 2)
+        return bw.write_bits(1, 1) && bw.write_bits(0, 3);
+    return false;
+}
+
+static bool write_two_type_block_category(orot::brotli::BitWriter& bw) {
+    return write_varlen_uint8_plus_one(bw, 2)
+        && write_single_symbol_prefix(bw, 4, 0)
+        && write_single_symbol_prefix(bw, 26, 0)
+        && bw.write_bits(0, 2);
+}
+
+static bool write_two_tree_context_map(
+    orot::brotli::BitWriter& bw,
+    int first_count,
+    int second_count)
+{
+    if (!bw.write_bits(0, 1) ||
+        !bw.write_bits(1, 2) ||
+        !bw.write_bits(1, 2) ||
+        !bw.write_bits(0, 1) ||
+        !bw.write_bits(1, 1))
+        return false;
+    for (int i = 0; i < first_count; ++i)
+        if (!bw.write_bits(0, 1))
+            return false;
+    for (int i = 0; i < second_count; ++i)
+        if (!bw.write_bits(1, 1))
+            return false;
+    return bw.write_bits(0, 1);
+}
+
 static void test_simple_prefix_code() {
     uint8_t storage[16] = {};
     orot::brotli::BitWriter bw;
@@ -306,6 +344,142 @@ static void test_compressed_copy_stream() {
     CHECK(std::memcmp(output, "ababab", 6) == 0, "copy stream output bytes");
 }
 
+static void test_compressed_command_block_switch_stream() {
+    uint8_t storage[96] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "command switch wbits 22");
+    CHECK(bw.write_bits(0, 1), "command switch non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "command switch mnibbles");
+    CHECK(bw.write_bits(3, 16), "command switch meta length four");
+    CHECK(bw.write_bits(0, 1), "command switch compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "command switch one literal block type");
+    CHECK(write_two_type_block_category(bw), "command switch two command types");
+    CHECK(bw.write_bits(0, 1), "command switch one distance block type");
+    CHECK(bw.write_bits(0, 2), "command switch npostfix zero");
+    CHECK(bw.write_bits(0, 4), "command switch ndirect zero");
+    CHECK(bw.write_bits(0, 2), "command switch literal context mode zero");
+    CHECK(bw.write_bits(0, 1), "command switch one literal tree");
+    CHECK(bw.write_bits(0, 1), "command switch one distance tree");
+
+    CHECK(write_single_symbol_prefix(bw, 256, 'a'), "command switch literal tree");
+    CHECK(write_single_symbol_prefix(bw, 704, 136), "command switch command tree 0");
+    CHECK(write_single_symbol_prefix(bw, 704, 8), "command switch command tree 1");
+    CHECK(write_single_symbol_prefix(bw, 64, 16), "command switch distance tree");
+
+    CHECK(bw.write_bits(0, 1), "command switch direct distance one");
+    CHECK(bw.write_bits(0, 2), "command switch next block count one");
+
+    CHECK(bw.write_bits(1, 1), "command switch final meta-block");
+    CHECK(bw.write_bits(1, 1), "command switch final empty");
+    CHECK(bw.finish_zero(), "finish command switch stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 4, "decode command block switch stream");
+    CHECK(actual == 4, "command switch actual size");
+    CHECK(std::memcmp(output, "aaaa", 4) == 0, "command switch output bytes");
+}
+
+static void test_compressed_literal_block_switch_stream() {
+    uint8_t storage[128] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "literal switch wbits 22");
+    CHECK(bw.write_bits(0, 1), "literal switch non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "literal switch mnibbles");
+    CHECK(bw.write_bits(1, 16), "literal switch meta length two");
+    CHECK(bw.write_bits(0, 1), "literal switch compressed flag");
+
+    CHECK(write_two_type_block_category(bw), "literal switch two literal types");
+    CHECK(bw.write_bits(0, 1), "literal switch one command block type");
+    CHECK(bw.write_bits(0, 1), "literal switch one distance block type");
+    CHECK(bw.write_bits(0, 2), "literal switch npostfix zero");
+    CHECK(bw.write_bits(0, 4), "literal switch ndirect zero");
+    CHECK(bw.write_bits(0, 2), "literal switch context mode 0");
+    CHECK(bw.write_bits(0, 2), "literal switch context mode 1");
+    CHECK(write_varlen_uint8_plus_one(bw, 2), "literal switch two literal trees");
+    CHECK(write_two_tree_context_map(bw, 64, 64), "literal switch context map");
+    CHECK(bw.write_bits(0, 1), "literal switch one distance tree");
+
+    CHECK(write_single_symbol_prefix(bw, 256, 'a'), "literal switch literal tree 0");
+    CHECK(write_single_symbol_prefix(bw, 256, 'b'), "literal switch literal tree 1");
+    CHECK(write_single_symbol_prefix(bw, 704, 16), "literal switch command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 0), "literal switch distance tree");
+
+    CHECK(bw.write_bits(0, 2), "literal switch next block count one");
+
+    CHECK(bw.write_bits(1, 1), "literal switch final meta-block");
+    CHECK(bw.write_bits(1, 1), "literal switch final empty");
+    CHECK(bw.finish_zero(), "finish literal switch stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 2, "decode literal block switch stream");
+    CHECK(actual == 2, "literal switch actual size");
+    CHECK(std::memcmp(output, "ab", 2) == 0, "literal switch output bytes");
+}
+
+static void test_compressed_distance_block_switch_stream() {
+    uint8_t storage[128] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "distance switch wbits 22");
+    CHECK(bw.write_bits(0, 1), "distance switch non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "distance switch mnibbles");
+    CHECK(bw.write_bits(5, 16), "distance switch meta length six");
+    CHECK(bw.write_bits(0, 1), "distance switch compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "distance switch one literal block type");
+    CHECK(bw.write_bits(0, 1), "distance switch one command block type");
+    CHECK(write_two_type_block_category(bw), "distance switch two distance types");
+    CHECK(bw.write_bits(0, 2), "distance switch npostfix zero");
+    CHECK(bw.write_bits(0, 4), "distance switch ndirect zero");
+    CHECK(bw.write_bits(0, 2), "distance switch literal context mode zero");
+    CHECK(bw.write_bits(0, 1), "distance switch one literal tree");
+    CHECK(write_varlen_uint8_plus_one(bw, 2), "distance switch two distance trees");
+    CHECK(write_two_tree_context_map(bw, 4, 4), "distance switch context map");
+
+    CHECK(bw.write_bits(1, 2), "distance switch literal simple prefix marker");
+    CHECK(bw.write_bits(1, 2), "distance switch literal two-symbol prefix");
+    CHECK(bw.write_bits('a', 8), "distance switch literal symbol a");
+    CHECK(bw.write_bits('b', 8), "distance switch literal symbol b");
+    CHECK(bw.write_bits(1, 2), "distance switch command simple prefix marker");
+    CHECK(bw.write_bits(1, 2), "distance switch command two-symbol prefix");
+    CHECK(bw.write_bits(144, 10), "distance switch command symbol insert/copy");
+    CHECK(bw.write_bits(128, 10), "distance switch command symbol copy");
+    CHECK(write_single_symbol_prefix(bw, 64, 16), "distance switch distance tree 0");
+    CHECK(write_single_symbol_prefix(bw, 64, 17), "distance switch distance tree 1");
+
+    CHECK(write_prefix_bits(bw, 1, 1), "distance switch first command");
+    CHECK(write_prefix_bits(bw, 0, 1), "distance switch literal a");
+    CHECK(write_prefix_bits(bw, 1, 1), "distance switch literal b");
+    CHECK(bw.write_bits(1, 1), "distance switch first distance extra");
+    CHECK(write_prefix_bits(bw, 0, 1), "distance switch second command");
+    CHECK(bw.write_bits(0, 2), "distance switch next block count one");
+    CHECK(bw.write_bits(1, 1), "distance switch second distance extra");
+
+    CHECK(bw.write_bits(1, 1), "distance switch final meta-block");
+    CHECK(bw.write_bits(1, 1), "distance switch final empty");
+    CHECK(bw.finish_zero(), "finish distance switch stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 6, "decode distance block switch stream");
+    CHECK(actual == 6, "distance switch actual size");
+    CHECK(std::memcmp(output, "ababab", 6) == 0, "distance switch output bytes");
+}
+
 int main() {
     test_simple_prefix_code();
     test_complex_prefix_code();
@@ -313,6 +487,9 @@ int main() {
     test_compressed_meta_block_header();
     test_compressed_insert_only_stream();
     test_compressed_copy_stream();
+    test_compressed_command_block_switch_stream();
+    test_compressed_literal_block_switch_stream();
+    test_compressed_distance_block_switch_stream();
 
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);
