@@ -11,7 +11,8 @@ orot/
 │   ├── lzw.h               # LZW C API
 │   ├── lzma.h              # LZMA/LZMA2 C/C++ API
 │   ├── bzip2.h             # Bzip2 C/C++ API
-│   └── zstd.h              # Zstandard C API (whole-buffer, dictionary, buffered streaming)
+│   ├── zstd.h              # Zstandard C API (whole-buffer, dictionary, buffered streaming)
+│   └── brotli.h            # Brotli C/C++ API 스캐폴드
 ├── src/
 │   ├── core/               # 핵심 압축 프리미티브
 │   │   ├── huffman.{cpp,hpp}        # Huffman 인코딩/디코딩 (Package-Merge)
@@ -52,6 +53,9 @@ orot/
 │   │   ├── fse.{cpp,hpp}   # FSE normalized count/table + reverse bitstream decoder
 │   │   ├── huf.{cpp,hpp}   # zstd literal Huffman table/stream decoder
 │   │   └── zstd.cpp        # frame/block parser + raw/RLE/compressed 압축해제 + XXH64 checksum
+│   ├── brotli/             # Brotli 구현 스캐폴드
+│   │   ├── brotli_compress.{cpp,hpp}   # Brotli 압축 모듈 경계
+│   │   └── brotli_decompress.{cpp,hpp} # Brotli 압축해제 모듈 경계
 │   ├── api/                # C API 진입점
 │   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
@@ -59,7 +63,8 @@ orot/
 │   │   ├── lzw_api.cpp     # LZW C API 진입점
 │   │   ├── lzma_api.cpp    # LZMA/LZMA2 C API 진입점
 │   │   ├── bzip2_api.cpp   # Bzip2 C API 진입점
-│   │   └── zstd_api.cpp    # Zstandard C API 진입점
+│   │   ├── zstd_api.cpp    # Zstandard C API 진입점
+│   │   └── brotli_api.cpp  # Brotli C API 진입점
 │   ├── parallel/           # 멀티스레드 압축 (pigz 스타일)
 │   │   ├── thread_pool.{cpp,hpp}           # 고정 스레드 풀 실행기
 │   │   ├── parallel_compressor.{cpp,hpp}   # 블록 분할 + 병합 워커
@@ -94,7 +99,8 @@ orot/
 │   │   ├── test_lz4_comprehensive.cpp # LZ4 엣지 케이스 종합
 │   │   ├── test_lzma.cpp             # LZMA/LZMA2 라운드트립 + 엣지 케이스
 │   │   ├── test_bzip2.cpp            # Bzip2 라운드트립 + 엣지 케이스
-│   │   └── test_zstd.cpp             # Zstandard frame/block/compressed sample + dictionary/streaming + 에러 경로
+│   │   ├── test_zstd.cpp             # Zstandard frame/block/compressed sample + dictionary/streaming + 에러 경로
+│   │   └── test_brotli.cpp           # Brotli API 스캐폴드 + 미구현 에러 계약
 │   ├── bench/
 │   │   ├── bench_compress.cpp        # DEFLATE 단일 라이브러리 벤치 (→ bench_deflate)
 │   │   ├── bench_compare.cpp         # DEFLATE 비교 벤치 (zlib, libdeflate) (→ bench_deflate_compare)
@@ -105,7 +111,9 @@ orot/
 │   │   ├── bench_bzip2.cpp           # Bzip2 단일 라이브러리 벤치 (→ bench_bzip2)
 │   │   ├── bench_bzip2_compare.cpp   # Bzip2 비교 벤치 (libbz2) (→ bench_bzip2_compare)
 │   │   ├── bench_zstd.cpp            # Zstandard 단일 라이브러리 벤치 (→ bench_zstd)
-│   │   └── bench_zstd_compare.cpp    # Zstandard 비교 벤치 (libzstd) (→ bench_zstd_compare)
+│   │   ├── bench_zstd_compare.cpp    # Zstandard 비교 벤치 (libzstd) (→ bench_zstd_compare)
+│   │   ├── bench_brotli.cpp          # Brotli 벤치 스캐폴드 (→ bench_brotli)
+│   │   └── bench_brotli_compare.cpp  # Brotli 비교 벤치 스캐폴드 (→ bench_brotli_compare)
 │   ├── compat/
 │   │   ├── test_compat.cpp       # DEFLATE 교차 라이브러리 호환성 (zlib/libdeflate, 126 케이스)
 │   │   └── test_codec_compat.cpp # LZ4/LZMA/LZMA2/Bzip2/Zstandard 교차 라이브러리 호환성
@@ -218,6 +226,11 @@ orot_zstd_compress_stream_new/free()
 orot_zstd_compress_stream_set_dict/update/finish()
 orot_zstd_decompress_stream_new/free()
 orot_zstd_decompress_stream_set_dict/update/finish()
+
+// Brotli (brotli.h)
+orot_brotli_compress_bound()
+orot_brotli_compress()
+orot_brotli_decompress()
 ```
 
 ## C++ API

@@ -40,6 +40,8 @@ add_unit_test(test_bzip2 unit/test_bzip2.cpp)
 
 add_unit_test(test_zstd unit/test_zstd.cpp)
 
+add_unit_test(test_brotli unit/test_brotli.cpp)
+
 # ── Fuzz targets (opt-in: -DOROT_DEFLATE_FUZZ=ON, requires clang + libFuzzer) ─────
 if(OROT_DEFLATE_FUZZ)
   # Build an instrumented copy of the deflate library so the fuzzer can
@@ -109,7 +111,8 @@ if(OROT_BENCHMARK)
   add_orot_benchmark(bench_lzma bench/bench_lzma.cpp)
   add_orot_benchmark(bench_bzip2 bench/bench_bzip2.cpp)
   add_orot_benchmark(bench_zstd bench/bench_zstd.cpp)
-  message(STATUS "Deflate + LZ4 + LZW + LZMA + Bzip2 + Zstandard: performance benchmarks enabled")
+  add_orot_benchmark(bench_brotli bench/bench_brotli.cpp)
+  message(STATUS "Deflate + LZ4 + LZW + LZMA + Bzip2 + Zstandard + Brotli: performance benchmarks enabled")
 endif()
 
 # ── Comparison benchmarks (-DOROT_BENCHMARK_COMPARE=ON) ──────────────────────
@@ -213,6 +216,11 @@ if(OROT_BENCHMARK_COMPARE)
     )
   target_compile_options(bench_zstd_compare PRIVATE -O3)
   message(STATUS "Zstandard: comparison benchmark enabled (orot + libzstd)")
+
+  # Brotli comparison placeholder — real external-lib comparison is added with
+  # the encoder/decoder implementation.
+  add_orot_benchmark(bench_brotli_compare bench/bench_brotli_compare.cpp)
+  message(STATUS "Brotli: comparison benchmark placeholder enabled")
 endif()
 
 # ── Cross-library compatibility tests (auto when OROT_TESTS=ON + zlib+libdeflate present) ──

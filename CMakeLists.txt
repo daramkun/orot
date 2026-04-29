@@ -80,6 +80,12 @@ set(OROT_ZSTD_SOURCES
     src/api/zstd_api.cpp
 )
 
+set(OROT_BROTLI_SOURCES
+    src/brotli/brotli_compress.cpp
+    src/brotli/brotli_decompress.cpp
+    src/api/brotli_api.cpp
+)
+
 # ── SIMD object libraries (each with its own compile flags) ──────────────────
 set(OROT_DEFLATE_SIMD_OBJECTS "")
 
@@ -171,6 +177,7 @@ if(OROT_SHARED)
         ${OROT_LZMA_SOURCES}
         ${OROT_BZIP2_SOURCES}
         ${OROT_ZSTD_SOURCES}
+        ${OROT_BROTLI_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 else()
   add_library(orot STATIC ${OROT_DEFLATE_CORE_SOURCES}
@@ -179,6 +186,7 @@ else()
         ${OROT_LZMA_SOURCES}
         ${OROT_BZIP2_SOURCES}
         ${OROT_ZSTD_SOURCES}
+        ${OROT_BROTLI_SOURCES}
         ${OROT_DEFLATE_SIMD_OBJECTS})
 endif()
 
@@ -204,6 +212,7 @@ target_compile_definitions(orot PRIVATE
     OROT_HAS_LZMA
     OROT_HAS_BZIP2
     OROT_HAS_ZSTD
+    OROT_HAS_BROTLI
 )
 
 deflate_set_compiler_flags(orot)
