@@ -84,6 +84,22 @@ static bool write_two_tree_context_map(
     return bw.write_bits(0, 1);
 }
 
+static bool write_binary_context_map(
+    orot::brotli::BitWriter& bw,
+    const std::vector<uint8_t>& values)
+{
+    if (!bw.write_bits(0, 1) ||
+        !bw.write_bits(1, 2) ||
+        !bw.write_bits(1, 2) ||
+        !bw.write_bits(0, 1) ||
+        !bw.write_bits(1, 1))
+        return false;
+    for (uint8_t value : values)
+        if (!bw.write_bits(value != 0 ? 1u : 0u, 1))
+            return false;
+    return bw.write_bits(0, 1);
+}
+
 static void test_simple_prefix_code() {
     uint8_t storage[16] = {};
     orot::brotli::BitWriter bw;
@@ -480,6 +496,94 @@ static void test_compressed_distance_block_switch_stream() {
     CHECK(std::memcmp(output, "ababab", 6) == 0, "distance switch output bytes");
 }
 
+static void test_compressed_literal_context_mode_stream() {
+    uint8_t storage[128] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "literal context wbits 22");
+    CHECK(bw.write_bits(0, 1), "literal context non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "literal context mnibbles");
+    CHECK(bw.write_bits(1, 16), "literal context meta length two");
+    CHECK(bw.write_bits(0, 1), "literal context compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "literal context one literal block type");
+    CHECK(bw.write_bits(0, 1), "literal context one command block type");
+    CHECK(bw.write_bits(0, 1), "literal context one distance block type");
+    CHECK(bw.write_bits(0, 2), "literal context npostfix zero");
+    CHECK(bw.write_bits(0, 4), "literal context ndirect zero");
+    CHECK(bw.write_bits(1, 2), "literal context MSB6 mode");
+    CHECK(write_varlen_uint8_plus_one(bw, 2), "literal context two literal trees");
+    std::vector<uint8_t> literal_map(64, 0);
+    literal_map[static_cast<size_t>('A' >> 2)] = 1;
+    CHECK(write_binary_context_map(bw, literal_map), "literal context map");
+    CHECK(bw.write_bits(0, 1), "literal context one distance tree");
+
+    CHECK(write_single_symbol_prefix(bw, 256, 'A'), "literal context tree 0");
+    CHECK(write_single_symbol_prefix(bw, 256, 'B'), "literal context tree 1");
+    CHECK(write_single_symbol_prefix(bw, 704, 16), "literal context command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 0), "literal context distance tree");
+
+    CHECK(bw.write_bits(1, 1), "literal context final meta-block");
+    CHECK(bw.write_bits(1, 1), "literal context final empty");
+    CHECK(bw.finish_zero(), "finish literal context stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 2, "decode literal context stream");
+    CHECK(actual == 2, "literal context actual size");
+    CHECK(std::memcmp(output, "AB", 2) == 0, "literal context output bytes");
+}
+
+static void test_compressed_distance_context_stream() {
+    uint8_t storage[128] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "distance context wbits 22");
+    CHECK(bw.write_bits(0, 1), "distance context non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "distance context mnibbles");
+    CHECK(bw.write_bits(5, 16), "distance context meta length six");
+    CHECK(bw.write_bits(0, 1), "distance context compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "distance context one literal block type");
+    CHECK(bw.write_bits(0, 1), "distance context one command block type");
+    CHECK(bw.write_bits(0, 1), "distance context one distance block type");
+    CHECK(bw.write_bits(0, 2), "distance context npostfix zero");
+    CHECK(bw.write_bits(0, 4), "distance context ndirect zero");
+    CHECK(bw.write_bits(0, 2), "distance context literal mode zero");
+    CHECK(bw.write_bits(0, 1), "distance context one literal tree");
+    CHECK(write_varlen_uint8_plus_one(bw, 2), "distance context two distance trees");
+    std::vector<uint8_t> distance_map = {0, 0, 1, 0};
+    CHECK(write_binary_context_map(bw, distance_map), "distance context map");
+
+    CHECK(bw.write_bits(1, 2), "distance context literal simple prefix marker");
+    CHECK(bw.write_bits(1, 2), "distance context literal two-symbol prefix");
+    CHECK(bw.write_bits('a', 8), "distance context literal symbol a");
+    CHECK(bw.write_bits('b', 8), "distance context literal symbol b");
+    CHECK(write_single_symbol_prefix(bw, 704, 146), "distance context command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 17), "distance context tree 0");
+    CHECK(write_single_symbol_prefix(bw, 64, 16), "distance context tree 1");
+
+    CHECK(write_prefix_bits(bw, 0, 1), "distance context literal a");
+    CHECK(write_prefix_bits(bw, 1, 1), "distance context literal b");
+    CHECK(bw.write_bits(1, 1), "distance context distance extra");
+
+    CHECK(bw.write_bits(1, 1), "distance context final meta-block");
+    CHECK(bw.write_bits(1, 1), "distance context final empty");
+    CHECK(bw.finish_zero(), "finish distance context stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 6, "decode distance context stream");
+    CHECK(actual == 6, "distance context actual size");
+    CHECK(std::memcmp(output, "ababab", 6) == 0, "distance context output bytes");
+}
+
 int main() {
     test_simple_prefix_code();
     test_complex_prefix_code();
@@ -490,6 +594,8 @@ int main() {
     test_compressed_command_block_switch_stream();
     test_compressed_literal_block_switch_stream();
     test_compressed_distance_block_switch_stream();
+    test_compressed_literal_context_mode_stream();
+    test_compressed_distance_context_stream();
 
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);
