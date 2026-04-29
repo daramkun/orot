@@ -54,8 +54,36 @@ static void test_simple_prefix_code() {
     CHECK(code.decode(br) == 17, "single-symbol prefix is reusable");
 }
 
+static void test_complex_prefix_code() {
+    uint8_t storage[32] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    /* HSKIP=0, then the code-length-code lengths in Brotli order.
+     * Only code-length symbol 1 is present, so the represented prefix code
+     * expands to two symbols with length 1. */
+    CHECK(bw.write_bits(0, 2), "complex prefix marker");
+    CHECK(bw.write_bits(0b0111, 4), "code-length symbol 1 has length 1");
+    for (int i = 1; i < 18; ++i)
+        CHECK(bw.write_bits(0, 2), "remaining code-length symbol is zero");
+    CHECK(bw.write_bits(0, 1), "decode first complex symbol");
+    CHECK(bw.write_bits(1, 1), "decode second complex symbol");
+    CHECK(bw.finish_zero(), "finish complex prefix bits");
+
+    orot::brotli::BitReader br;
+    br.init(storage, bw.bytes_written(storage));
+
+    orot::brotli::PrefixCode code;
+    CHECK(orot::brotli::read_prefix_code(br, 2, code),
+          "read complex prefix code");
+    CHECK(code.decode(br) == 0, "decode first complex prefix symbol");
+    CHECK(code.decode(br) == 1, "decode second complex prefix symbol");
+    CHECK(!br.error, "complex prefix decode has no bit error");
+}
+
 int main() {
     test_simple_prefix_code();
+    test_complex_prefix_code();
 
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);

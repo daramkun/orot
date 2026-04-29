@@ -26,5 +26,6 @@ struct PrefixCode {
 };
 
 bool read_simple_prefix_code(BitReader& br, int alphabet_size, PrefixCode& out) noexcept;
+bool read_prefix_code(BitReader& br, int alphabet_size, PrefixCode& out) noexcept;
 
 } } /* namespace orot::brotli */

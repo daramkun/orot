@@ -15,6 +15,9 @@ static int alphabet_bits(int alphabet_size) noexcept {
     return bits;
 }
 
+static bool read_simple_prefix_code_body(
+    BitReader& br, int alphabet_size, PrefixCode& out) noexcept;
+
 bool PrefixCode::build(const uint8_t* lengths, int alphabet_size) noexcept {
     num_entries = 0;
     max_length = 0;
@@ -93,6 +96,14 @@ bool read_simple_prefix_code(BitReader& br, int alphabet_size, PrefixCode& out) 
     if (br.read_bits(2) != 1 || br.error)
         return false;
 
+    return read_simple_prefix_code_body(br, alphabet_size, out);
+}
+
+static bool read_simple_prefix_code_body(
+    BitReader& br, int alphabet_size, PrefixCode& out) noexcept {
+    if (alphabet_size <= 0 || alphabet_size > PrefixCode::kMaxEntries)
+        return false;
+
     int nsym = static_cast<int>(br.read_bits(2)) + 1;
     int abits = alphabet_bits(alphabet_size);
     if (br.error)
@@ -150,6 +161,175 @@ bool read_simple_prefix_code(BitReader& br, int alphabet_size, PrefixCode& out) 
     }
 
     return out.build(lengths, alphabet_size);
+}
+
+static bool build_code_length_code(
+    BitReader& br, int hskip, PrefixCode& out) noexcept {
+    static const uint8_t kOrder[18] = {
+        1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    };
+    static const uint8_t kFixedCodeLengths[6] = {2, 4, 3, 2, 2, 4};
+
+    PrefixCode fixed;
+    if (!fixed.build(kFixedCodeLengths, 6))
+        return false;
+
+    uint8_t lengths[18];
+    std::memset(lengths, 0, sizeof(lengths));
+
+    int nonzero = 0;
+    int space = 32;
+
+    for (int i = hskip; i < 18; ++i) {
+        int len = fixed.decode(br);
+        if (len < 0 || len > 5 || br.error)
+            return false;
+        lengths[kOrder[i]] = static_cast<uint8_t>(len);
+        if (len != 0) {
+            ++nonzero;
+            space -= 32 >> len;
+            if (space < 0)
+                return false;
+            if (nonzero >= 2 && space == 0)
+                break;
+        }
+    }
+
+    if (nonzero == 0)
+        return false;
+    if (nonzero >= 2 && space != 0)
+        return false;
+
+    return out.build(lengths, 18);
+}
+
+static bool flush_repeat(
+    uint8_t* lengths,
+    int alphabet_size,
+    int& pos,
+    int repeat_symbol,
+    int repeat_count,
+    int& prev_nonzero,
+    int& space,
+    int& nonzero) noexcept {
+    if (repeat_symbol == 0)
+        return true;
+    if (repeat_count <= 0 || pos + repeat_count > alphabet_size)
+        return false;
+
+    uint8_t value = 0;
+    if (repeat_symbol == 16) {
+        value = static_cast<uint8_t>(prev_nonzero != 0 ? prev_nonzero : 8);
+        prev_nonzero = value;
+    }
+
+    for (int i = 0; i < repeat_count; ++i) {
+        lengths[pos++] = value;
+        if (value != 0) {
+            ++nonzero;
+            space -= 32768 >> value;
+            if (space < 0)
+                return false;
+        }
+    }
+    return true;
+}
+
+static bool read_complex_prefix_code(
+    BitReader& br, int hskip, int alphabet_size, PrefixCode& out) noexcept {
+    PrefixCode code_length_code;
+    if (!build_code_length_code(br, hskip, code_length_code))
+        return false;
+
+    uint8_t lengths[PrefixCode::kMaxEntries];
+    std::memset(lengths, 0, static_cast<size_t>(alphabet_size));
+
+    int pos = 0;
+    int prev_nonzero = 0;
+    int repeat_symbol = 0;
+    int repeat_count = 0;
+    int last_symbol = -1;
+    int space = 32768;
+    int nonzero = 0;
+
+    auto add_length = [&](int len) -> bool {
+        if (pos >= alphabet_size)
+            return false;
+        lengths[pos++] = static_cast<uint8_t>(len);
+        if (len != 0) {
+            prev_nonzero = len;
+            ++nonzero;
+            space -= 32768 >> len;
+            if (space < 0)
+                return false;
+        }
+        return true;
+    };
+
+    while (pos < alphabet_size && space > 0) {
+        int sym = code_length_code.decode(br);
+        if (sym < 0 || br.error)
+            return false;
+
+        if (sym == 16 || sym == 17) {
+            int extra_bits = (sym == 16) ? 2 : 3;
+            int base = (sym == 16) ? 3 : 3;
+            int mult = (sym == 16) ? 4 : 8;
+            int count = base + static_cast<int>(br.read_bits(extra_bits));
+            if (br.error)
+                return false;
+
+            if (repeat_symbol == sym) {
+                repeat_count = mult * (repeat_count - 2) + count;
+            } else {
+                if (!flush_repeat(lengths, alphabet_size, pos,
+                                  repeat_symbol, repeat_count, prev_nonzero,
+                                  space, nonzero))
+                    return false;
+                repeat_symbol = sym;
+                repeat_count = count;
+            }
+            last_symbol = sym;
+            continue;
+        }
+
+        if (!flush_repeat(lengths, alphabet_size, pos,
+                          repeat_symbol, repeat_count, prev_nonzero,
+                          space, nonzero))
+            return false;
+        repeat_symbol = 0;
+        repeat_count = 0;
+
+        if (!add_length(sym))
+            return false;
+        last_symbol = sym;
+    }
+
+    if (!flush_repeat(lengths, alphabet_size, pos,
+                      repeat_symbol, repeat_count, prev_nonzero,
+                      space, nonzero))
+        return false;
+
+    if (last_symbol == 0 || last_symbol == 17)
+        return false;
+    if (nonzero < 2 || space != 0)
+        return false;
+
+    return out.build(lengths, alphabet_size);
+}
+
+bool read_prefix_code(BitReader& br, int alphabet_size, PrefixCode& out) noexcept {
+    if (alphabet_size <= 0 || alphabet_size > PrefixCode::kMaxEntries)
+        return false;
+
+    uint32_t tag = br.read_bits(2);
+    if (br.error)
+        return false;
+    if (tag == 1)
+        return read_simple_prefix_code_body(br, alphabet_size, out);
+    if (tag == 0 || tag == 2 || tag == 3)
+        return read_complex_prefix_code(br, static_cast<int>(tag), alphabet_size, out);
+    return false;
 }
 
 } } /* namespace orot::brotli */
