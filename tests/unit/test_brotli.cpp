@@ -39,6 +39,13 @@ static bool write_single_symbol_prefix(
         && bw.write_bits(symbol, brotli_alphabet_bits(alphabet_size));
 }
 
+static bool write_prefix_bits(orot::brotli::BitWriter& bw, uint32_t code, int len) {
+    uint32_t reversed = 0;
+    for (int i = 0; i < len; ++i)
+        reversed = (reversed << 1) | ((code >> i) & 1u);
+    return bw.write_bits(reversed, len);
+}
+
 static void test_simple_prefix_code() {
     uint8_t storage[16] = {};
     orot::brotli::BitWriter bw;
@@ -210,11 +217,102 @@ static void test_compressed_meta_block_header() {
           "single literal tree decodes without bits");
 }
 
+static void test_compressed_insert_only_stream() {
+    uint8_t storage[64] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "insert-only wbits 22");
+    CHECK(bw.write_bits(0, 1), "insert-only non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "insert-only mnibbles");
+    CHECK(bw.write_bits(2, 16), "insert-only meta length three");
+    CHECK(bw.write_bits(0, 1), "insert-only compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "insert-only one literal block type");
+    CHECK(bw.write_bits(0, 1), "insert-only one command block type");
+    CHECK(bw.write_bits(0, 1), "insert-only one distance block type");
+    CHECK(bw.write_bits(0, 2), "insert-only npostfix zero");
+    CHECK(bw.write_bits(0, 4), "insert-only ndirect zero");
+    CHECK(bw.write_bits(0, 2), "insert-only literal context mode zero");
+    CHECK(bw.write_bits(0, 1), "insert-only one literal tree");
+    CHECK(bw.write_bits(0, 1), "insert-only one distance tree");
+
+    CHECK(bw.write_bits(1, 2), "insert-only literal simple prefix marker");
+    CHECK(bw.write_bits(2, 2), "insert-only literal three-symbol prefix");
+    CHECK(bw.write_bits('a', 8), "insert-only literal symbol a");
+    CHECK(bw.write_bits('b', 8), "insert-only literal symbol b");
+    CHECK(bw.write_bits('c', 8), "insert-only literal symbol c");
+    CHECK(write_single_symbol_prefix(bw, 704, 24), "insert-only command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 0), "insert-only distance tree");
+
+    CHECK(write_prefix_bits(bw, 0, 1), "insert-only literal a");
+    CHECK(write_prefix_bits(bw, 2, 2), "insert-only literal b");
+    CHECK(write_prefix_bits(bw, 3, 2), "insert-only literal c");
+
+    CHECK(bw.write_bits(1, 1), "insert-only final meta-block");
+    CHECK(bw.write_bits(1, 1), "insert-only final empty");
+    CHECK(bw.finish_zero(), "finish insert-only stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 3, "decode insert-only compressed stream");
+    CHECK(actual == 3, "insert-only actual size");
+    CHECK(std::memcmp(output, "abc", 3) == 0, "insert-only output bytes");
+}
+
+static void test_compressed_copy_stream() {
+    uint8_t storage[64] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "copy stream wbits 22");
+    CHECK(bw.write_bits(0, 1), "copy stream non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "copy stream mnibbles");
+    CHECK(bw.write_bits(5, 16), "copy stream meta length six");
+    CHECK(bw.write_bits(0, 1), "copy stream compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "copy stream one literal block type");
+    CHECK(bw.write_bits(0, 1), "copy stream one command block type");
+    CHECK(bw.write_bits(0, 1), "copy stream one distance block type");
+    CHECK(bw.write_bits(0, 2), "copy stream npostfix zero");
+    CHECK(bw.write_bits(0, 4), "copy stream ndirect zero");
+    CHECK(bw.write_bits(0, 2), "copy stream literal context mode zero");
+    CHECK(bw.write_bits(0, 1), "copy stream one literal tree");
+    CHECK(bw.write_bits(0, 1), "copy stream one distance tree");
+
+    CHECK(bw.write_bits(1, 2), "copy stream literal simple prefix marker");
+    CHECK(bw.write_bits(1, 2), "copy stream literal two-symbol prefix");
+    CHECK(bw.write_bits('a', 8), "copy stream literal symbol a");
+    CHECK(bw.write_bits('b', 8), "copy stream literal symbol b");
+    CHECK(write_single_symbol_prefix(bw, 704, 146), "copy stream command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 16), "copy stream distance tree");
+
+    CHECK(write_prefix_bits(bw, 0, 1), "copy stream literal a");
+    CHECK(write_prefix_bits(bw, 1, 1), "copy stream literal b");
+    CHECK(bw.write_bits(1, 1), "copy stream distance extra for distance two");
+
+    CHECK(bw.write_bits(1, 1), "copy stream final meta-block");
+    CHECK(bw.write_bits(1, 1), "copy stream final empty");
+    CHECK(bw.finish_zero(), "finish copy stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 6, "decode compressed copy stream");
+    CHECK(actual == 6, "copy stream actual size");
+    CHECK(std::memcmp(output, "ababab", 6) == 0, "copy stream output bytes");
+}
+
 int main() {
     test_simple_prefix_code();
     test_complex_prefix_code();
     test_meta_helpers();
     test_compressed_meta_block_header();
+    test_compressed_insert_only_stream();
+    test_compressed_copy_stream();
 
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);

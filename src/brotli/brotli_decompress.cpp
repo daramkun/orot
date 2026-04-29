@@ -39,6 +39,207 @@ static int decode_mnibbles(uint32_t code) noexcept {
     }
 }
 
+struct CommandLengths {
+    int insert_len = 0;
+    int copy_len = 0;
+    bool implicit_distance = false;
+};
+
+static bool decode_insert_length(int code, BitReader& br, int& out) noexcept {
+    static const uint16_t kBase[24] = {
+        0, 1, 2, 3, 4, 5, 6, 7,
+        8, 10, 14, 18, 26, 34, 50, 66,
+        98, 130, 194, 322, 578, 1090, 2114, 6210
+    };
+    static const uint8_t kExtra[24] = {
+        0, 0, 0, 0, 0, 0, 1, 2,
+        0, 1, 2, 3, 3, 4, 4, 5,
+        5, 6, 7, 8, 9, 10, 12, 14
+    };
+    if (code < 0 || code >= 24)
+        return false;
+    uint32_t extra = br.read_bits(kExtra[code]);
+    if (br.error)
+        return false;
+    out = static_cast<int>(kBase[code] + extra);
+    return true;
+}
+
+static bool decode_copy_length(int code, BitReader& br, int& out) noexcept {
+    static const uint16_t kBase[24] = {
+        2, 3, 4, 5, 6, 7, 8, 9,
+        10, 12, 14, 18, 22, 30, 38, 54,
+        70, 102, 134, 198, 326, 582, 1094, 2118
+    };
+    static const uint8_t kExtra[24] = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 2, 2, 3, 3, 4, 4,
+        5, 5, 6, 7, 8, 9, 10, 24
+    };
+    if (code < 0 || code >= 24)
+        return false;
+    uint32_t extra = br.read_bits(kExtra[code]);
+    if (br.error)
+        return false;
+    out = static_cast<int>(kBase[code] + extra);
+    return true;
+}
+
+static bool decode_command_symbol(
+    int symbol,
+    BitReader& br,
+    CommandLengths& out) noexcept
+{
+    if (symbol < 0 || symbol >= 704)
+        return false;
+
+    static const uint8_t kInsertBase[11] = {
+        0, 0, 0, 0, 8, 8, 0, 16, 8, 16, 16
+    };
+    static const uint8_t kCopyBase[11] = {
+        0, 8, 0, 8, 0, 8, 16, 0, 16, 8, 16
+    };
+
+    int group = symbol >> 6;
+    int low = symbol & 63;
+    int insert_code = kInsertBase[group] + ((low >> 3) & 7);
+    int copy_code = kCopyBase[group] + (low & 7);
+
+    out.implicit_distance = symbol < 128;
+    return decode_insert_length(insert_code, br, out.insert_len)
+        && decode_copy_length(copy_code, br, out.copy_len);
+}
+
+static bool compute_distance(
+    int distance_code,
+    BitReader& br,
+    int ndirect,
+    int npostfix,
+    const int last_distances[4],
+    int& out) noexcept
+{
+    if (distance_code < 0)
+        return false;
+    if (distance_code < 16) {
+        static const uint8_t kIndex[16] = {
+            0, 1, 2, 3, 0, 0, 0, 0,
+            0, 0, 1, 1, 1, 1, 1, 1
+        };
+        static const int8_t kDelta[16] = {
+            0, 0, 0, 0, -1, 1, -2, 2,
+            -3, 3, -1, 1, -2, 2, -3, 3
+        };
+        int distance = last_distances[kIndex[distance_code]] + kDelta[distance_code];
+        if (distance <= 0)
+            return false;
+        out = distance;
+        return true;
+    }
+
+    int adjusted = distance_code - 16;
+    if (adjusted < ndirect) {
+        out = adjusted + 1;
+        return true;
+    }
+
+    int postfix = adjusted & ((1 << npostfix) - 1);
+    int bucket = (adjusted - ndirect) >> npostfix;
+    int nbits = (bucket >> 1) + 1;
+    int offset = ((2 + (bucket & 1)) << nbits) - 4;
+    uint32_t extra = br.read_bits(nbits);
+    if (br.error)
+        return false;
+    out = ((offset + static_cast<int>(extra)) << npostfix) + postfix + ndirect + 1;
+    return true;
+}
+
+static void push_distance(int distance, int last_distances[4]) noexcept {
+    if (distance == last_distances[0])
+        return;
+    for (int i = 3; i > 0; --i)
+        last_distances[i] = last_distances[i - 1];
+    last_distances[0] = distance;
+}
+
+static BrotliDecodeStatus decode_compressed_meta_block(
+    BitReader& br,
+    const CompressedMetaBlockHeader& header,
+    size_t meta_len,
+    int wbits,
+    uint8_t* dst,
+    size_t dst_cap,
+    size_t& out_pos) noexcept
+{
+    (void)wbits;
+
+    if (header.block_categories[0].num_types != 1 ||
+        header.block_categories[1].num_types != 1 ||
+        header.block_categories[2].num_types != 1 ||
+        header.literal_trees.size() != 1 ||
+        header.command_trees.size() != 1 ||
+        header.distance_trees.size() != 1)
+        return BrotliDecodeStatus::Unsupported;
+
+    size_t produced = 0;
+    int last_distances[4] = {4, 11, 15, 16};
+
+    while (produced < meta_len) {
+        int command_symbol = header.command_trees[0].decode(br);
+        if (command_symbol < 0 || br.error)
+            return BrotliDecodeStatus::DataError;
+
+        CommandLengths lengths;
+        if (!decode_command_symbol(command_symbol, br, lengths))
+            return BrotliDecodeStatus::DataError;
+
+        if (lengths.insert_len < 0 || (size_t)lengths.insert_len > meta_len - produced)
+            return BrotliDecodeStatus::DataError;
+        if (out_pos + static_cast<size_t>(lengths.insert_len) > dst_cap)
+            return BrotliDecodeStatus::NeedOutput;
+
+        for (int i = 0; i < lengths.insert_len; ++i) {
+            int literal = header.literal_trees[0].decode(br);
+            if (literal < 0 || literal > 255 || br.error)
+                return BrotliDecodeStatus::DataError;
+            dst[out_pos++] = static_cast<uint8_t>(literal);
+            ++produced;
+        }
+
+        if (produced == meta_len)
+            break;
+
+        if ((size_t)lengths.copy_len > meta_len - produced)
+            return BrotliDecodeStatus::DataError;
+
+        int distance = last_distances[0];
+        bool should_push_distance = false;
+        if (!lengths.implicit_distance) {
+            int distance_code = header.distance_trees[0].decode(br);
+            if (distance_code < 0 || br.error)
+                return BrotliDecodeStatus::DataError;
+            if (!compute_distance(distance_code, br, header.ndirect,
+                                  header.npostfix, last_distances, distance))
+                return BrotliDecodeStatus::DataError;
+            should_push_distance = distance_code != 0;
+        }
+
+        if (distance <= 0 || static_cast<size_t>(distance) > out_pos)
+            return BrotliDecodeStatus::Unsupported;
+        if (out_pos + static_cast<size_t>(lengths.copy_len) > dst_cap)
+            return BrotliDecodeStatus::NeedOutput;
+
+        for (int i = 0; i < lengths.copy_len; ++i)
+            dst[out_pos + static_cast<size_t>(i)] =
+                dst[out_pos - static_cast<size_t>(distance) + static_cast<size_t>(i)];
+        out_pos += static_cast<size_t>(lengths.copy_len);
+        produced += static_cast<size_t>(lengths.copy_len);
+        if (should_push_distance)
+            push_distance(distance, last_distances);
+    }
+
+    return BrotliDecodeStatus::Ok;
+}
+
 BrotliDecodeStatus brotli_decompress(
     const uint8_t* src, size_t src_len,
     uint8_t* dst, size_t dst_cap,
@@ -113,7 +314,16 @@ BrotliDecodeStatus brotli_decompress(
         CompressedMetaBlockHeader header;
         if (!read_compressed_meta_block_header(br, header) || br.error)
             return BrotliDecodeStatus::DataError;
-        return BrotliDecodeStatus::Unsupported;
+        BrotliDecodeStatus status = decode_compressed_meta_block(
+            br, header, meta_len, wbits, dst, dst_cap, out_pos);
+        if (status != BrotliDecodeStatus::Ok)
+            return status;
+        if (is_last) {
+            if (!br.remaining_zero())
+                return BrotliDecodeStatus::DataError;
+            if (actual_out) *actual_out = out_pos;
+            return BrotliDecodeStatus::Ok;
+        }
     }
 }
 
