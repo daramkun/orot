@@ -56,6 +56,7 @@ orot/
 │   ├── brotli/             # Brotli 구현
 │   │   ├── brotli_bit.hpp             # Brotli LSB-first bit reader/writer
 │   │   ├── brotli_huffman.{cpp,hpp}   # Brotli simple prefix code parser/decoder
+│   │   ├── brotli_meta.{cpp,hpp}      # Brotli meta-block helper parsers
 │   │   ├── brotli_compress.{cpp,hpp}  # uncompressed meta-block encoder
 │   │   └── brotli_decompress.{cpp,hpp} # stream/meta-block parser + uncompressed decoder
 │   ├── api/                # C API 진입점

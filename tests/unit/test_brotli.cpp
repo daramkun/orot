@@ -8,6 +8,7 @@
 #include "orot/brotli.h"
 #include "brotli/brotli_bit.hpp"
 #include "brotli/brotli_huffman.hpp"
+#include "brotli/brotli_meta.hpp"
 
 static int failures = 0;
 
@@ -81,9 +82,78 @@ static void test_complex_prefix_code() {
     CHECK(!br.error, "complex prefix decode has no bit error");
 }
 
+static void test_meta_helpers() {
+    uint8_t storage[32] = {};
+    orot::brotli::BitWriter bw;
+    orot::brotli::BitReader br;
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(0, 1), "varlen value 1 marker");
+    CHECK(bw.finish_zero(), "finish varlen value 1");
+    br.init(storage, bw.bytes_written(storage));
+    CHECK(orot::brotli::read_var_len_uint8_plus_one(br) == 1,
+          "decode varlen value 1");
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(1, 1), "varlen extended marker");
+    CHECK(bw.write_bits(0, 3), "varlen value 2 selector");
+    CHECK(bw.finish_zero(), "finish varlen value 2");
+    br.init(storage, bw.bytes_written(storage));
+    CHECK(orot::brotli::read_var_len_uint8_plus_one(br) == 2,
+          "decode varlen value 2");
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(1, 1), "varlen extended marker for extra");
+    CHECK(bw.write_bits(2, 3), "varlen two extra bits selector");
+    CHECK(bw.write_bits(1, 2), "varlen extra payload");
+    CHECK(bw.finish_zero(), "finish varlen extra value");
+    br.init(storage, bw.bytes_written(storage));
+    CHECK(orot::brotli::read_var_len_uint8_plus_one(br) == 6,
+          "decode varlen value with extra bits");
+
+    br.init(storage, 0);
+    CHECK(orot::brotli::read_var_len_uint8_plus_one(br) == -1,
+          "varlen rejects truncated marker");
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(0, 2), "block count code zero extra");
+    CHECK(bw.finish_zero(), "finish block count code zero");
+    br.init(storage, bw.bytes_written(storage));
+    CHECK(orot::brotli::read_block_count(br, 0) == 1,
+          "decode block count base code");
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(3, 2), "block count code one extra");
+    CHECK(bw.finish_zero(), "finish block count code one");
+    br.init(storage, bw.bytes_written(storage));
+    CHECK(orot::brotli::read_block_count(br, 1) == 8,
+          "decode block count with extra bits");
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(0, 1), "context map rlemax zero");
+    CHECK(bw.write_bits(1, 2), "context map simple prefix marker");
+    CHECK(bw.write_bits(1, 2), "context map two-symbol prefix count");
+    CHECK(bw.write_bits(0, 1), "context map symbol zero");
+    CHECK(bw.write_bits(1, 1), "context map symbol one");
+    CHECK(bw.write_bits(0, 1), "context map entry zero");
+    CHECK(bw.write_bits(1, 1), "context map entry one");
+    CHECK(bw.write_bits(0, 1), "context map entry zero again");
+    CHECK(bw.write_bits(0, 1), "context map no inverse mtf");
+    CHECK(bw.finish_zero(), "finish context map");
+
+    br.init(storage, bw.bytes_written(storage));
+    std::vector<uint8_t> context_map;
+    CHECK(orot::brotli::read_context_map(br, 3, 2, context_map),
+          "decode context map");
+    CHECK(context_map.size() == 3, "context map size");
+    CHECK(context_map[0] == 0 && context_map[1] == 1 && context_map[2] == 0,
+          "context map entries");
+}
+
 int main() {
     test_simple_prefix_code();
     test_complex_prefix_code();
+    test_meta_helpers();
 
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);
