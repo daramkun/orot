@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "orot/brotli.h"
+#include "brotli/brotli_bit.hpp"
+#include "brotli/brotli_huffman.hpp"
 
 static int failures = 0;
 
@@ -16,7 +18,45 @@ static int failures = 0;
     } \
 } while (0)
 
+static void test_simple_prefix_code() {
+    uint8_t storage[16] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(1, 2), "simple prefix marker");
+    CHECK(bw.write_bits(1, 2), "two-symbol prefix count");
+    CHECK(bw.write_bits('A', 8), "first simple symbol");
+    CHECK(bw.write_bits('B', 8), "second simple symbol");
+    CHECK(bw.write_bits(0, 1), "decode A bit");
+    CHECK(bw.write_bits(1, 1), "decode B bit");
+    CHECK(bw.finish_zero(), "finish simple prefix bits");
+
+    orot::brotli::BitReader br;
+    br.init(storage, bw.bytes_written(storage));
+
+    orot::brotli::PrefixCode code;
+    CHECK(orot::brotli::read_simple_prefix_code(br, 256, code),
+          "read two-symbol simple prefix code");
+    CHECK(code.decode(br) == 'A', "decode first simple symbol");
+    CHECK(code.decode(br) == 'B', "decode second simple symbol");
+    CHECK(!br.error, "simple prefix decode has no bit error");
+
+    bw.init(storage, sizeof(storage));
+    CHECK(bw.write_bits(1, 2), "single simple prefix marker");
+    CHECK(bw.write_bits(0, 2), "single-symbol prefix count");
+    CHECK(bw.write_bits(17, 8), "single symbol value");
+    CHECK(bw.finish_zero(), "finish single prefix bits");
+
+    br.init(storage, bw.bytes_written(storage));
+    CHECK(orot::brotli::read_simple_prefix_code(br, 256, code),
+          "read one-symbol simple prefix code");
+    CHECK(code.decode(br) == 17, "single-symbol prefix decodes without bits");
+    CHECK(code.decode(br) == 17, "single-symbol prefix is reusable");
+}
+
 int main() {
+    test_simple_prefix_code();
+
     const char* text = "brotli api scaffold";
     const size_t len = std::strlen(text);
     const size_t bound = orot_brotli_compress_bound(len);

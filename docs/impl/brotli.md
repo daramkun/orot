@@ -12,6 +12,7 @@
 | libbrotlidec uncompressed stream 호환 테스트 | ✅ |
 | stream header + meta-block header parser | ✅ |
 | uncompressed meta-block encoder/decoder | ✅ |
+| simple prefix code parser/decoder | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -64,8 +65,9 @@ int orot_brotli_decompress(
 
 ## 다음 단계
 
-1. Huffman/meta-block command decoder 구현
-2. Google Brotli encoder가 만든 compressed stream 해제 호환성 추가
-3. minimal compressed encoder 구현
-4. static dictionary 지원 추가
-5. 퍼즈 테스트 추가
+1. complex prefix code parser 구현
+2. compressed meta-block command/literal/distance decoder 연결
+3. Google Brotli encoder가 만든 compressed stream 해제 호환성 추가
+4. minimal compressed encoder 구현
+5. static dictionary 지원 추가
+6. 퍼즈 테스트 추가
