@@ -21,6 +21,7 @@
 | literal/distance context map selection (LSB6/MSB6 + copy length) | ✅ |
 | UTF8/Signed literal context lookup table | ✅ |
 | libbrotlienc low-quality stream -> orot decode 호환 테스트 | ✅ |
+| static dictionary minimal decode entries (`hello`) | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -37,6 +38,7 @@ compressed meta-block은 단일-tree literal/copy, block switching,
 LSB6/MSB6/UTF8/Signed literal context, copy-length distance context를 해제할 수
 있다. libbrotlienc의 low-quality 짧은 스트림과 일부 반복 데이터 compressed
 stream을 해제할 수 있으며, static dictionary 등 미지원 경로는 `-4`를 반환한다.
+static dictionary는 현재 `hello` 계열 샘플에 필요한 최소 항목만 지원한다.
 
 ### API
 
@@ -76,7 +78,7 @@ int orot_brotli_decompress(
 
 ## 다음 단계
 
-1. static dictionary 지원 추가
+1. static dictionary 전체 데이터/transform 지원 추가
 2. Google Brotli encoder가 만든 일반 compressed stream 호환성 확대
 3. minimal compressed encoder 구현
 4. 퍼즈 테스트 추가

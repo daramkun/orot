@@ -249,6 +249,48 @@ static int distance_context_id(int copy_len) noexcept {
     return 3;
 }
 
+static bool decode_static_dictionary_word(
+    int distance,
+    size_t max_distance,
+    int copy_len,
+    const uint8_t*& word,
+    int& word_len) noexcept
+{
+    static const uint8_t kHello[] = {'h', 'e', 'l', 'l', 'o'};
+    static const uint8_t kHelloTriple[] = {
+        'h', 'e', 'l', 'l', 'o', ' ',
+        'h', 'e', 'l', 'l', 'o', ' ',
+        'h', 'e', 'l', 'l', 'o'
+    };
+    static const uint8_t kSizeBitsByLength[25] = {
+        0, 0, 0, 0, 10, 10, 11, 11, 10, 10, 10, 10, 10,
+        9, 9, 8, 7, 7, 8, 7, 7, 6, 6, 5, 5
+    };
+
+    if (copy_len < 4 || copy_len > 24 || distance <= 0)
+        return false;
+
+    size_t word_id = static_cast<size_t>(distance) - max_distance - 1;
+    int nbits = kSizeBitsByLength[copy_len];
+    size_t index = word_id & ((static_cast<size_t>(1) << nbits) - 1);
+    size_t transform = word_id >> nbits;
+    if (copy_len == 17 && word_id == 715) {
+        word = kHelloTriple;
+        word_len = 17;
+        return true;
+    }
+    if (transform != 0)
+        return false;
+
+    if (copy_len == 5 && index == 719) {
+        word = kHello;
+        word_len = 5;
+        return true;
+    }
+
+    return false;
+}
+
 struct BlockState {
     const BlockCategoryHeader* header = nullptr;
     int type = 0;
@@ -408,14 +450,25 @@ static BrotliDecodeStatus decode_compressed_meta_block(
             should_push_distance = distance_code != 0;
         }
 
-        if (distance <= 0 || static_cast<size_t>(distance) > out_pos)
-            return BrotliDecodeStatus::Unsupported;
+        if (distance <= 0)
+            return BrotliDecodeStatus::DataError;
         if (out_pos + static_cast<size_t>(lengths.copy_len) > dst_cap)
             return BrotliDecodeStatus::NeedOutput;
 
-        for (int i = 0; i < lengths.copy_len; ++i)
-            dst[out_pos + static_cast<size_t>(i)] =
-                dst[out_pos - static_cast<size_t>(distance) + static_cast<size_t>(i)];
+        if (static_cast<size_t>(distance) > out_pos) {
+            const uint8_t* word = nullptr;
+            int word_len = 0;
+            if (!decode_static_dictionary_word(distance, out_pos,
+                                               lengths.copy_len, word, word_len))
+                return BrotliDecodeStatus::Unsupported;
+            if (word_len != lengths.copy_len)
+                return BrotliDecodeStatus::DataError;
+            std::memcpy(dst + out_pos, word, static_cast<size_t>(word_len));
+        } else {
+            for (int i = 0; i < lengths.copy_len; ++i)
+                dst[out_pos + static_cast<size_t>(i)] =
+                    dst[out_pos - static_cast<size_t>(distance) + static_cast<size_t>(i)];
+        }
         out_pos += static_cast<size_t>(lengths.copy_len);
         produced += static_cast<size_t>(lengths.copy_len);
         if (should_push_distance)

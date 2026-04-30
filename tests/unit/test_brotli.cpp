@@ -756,8 +756,11 @@ int main() {
     n = orot_brotli_decompress(brotli_cli_compressed,
                                sizeof(brotli_cli_compressed),
                                decompressed.data(), decompressed.size(),
-                               nullptr);
-    CHECK(n == -4, "valid compressed meta-block reaches unsupported body decoder");
+                               &actual);
+    CHECK(n == 23, "decompress brotli CLI q5 hello stream");
+    CHECK(actual == 23, "brotli CLI q5 hello actual size");
+    CHECK(std::memcmp(decompressed.data(), "hello hello hello hello", 23) == 0,
+          "brotli CLI q5 hello output bytes");
 
     const uint8_t brotli_cli_q0_abc[] = {
         0x0f, 0x01, 0x80, 0x61, 0x62, 0x63, 0x03
