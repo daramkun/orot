@@ -107,6 +107,17 @@ static std::vector<uint8_t> make_random(size_t n) {
     return out;
 }
 
+static std::vector<uint8_t> make_multi_copy() {
+    const char* text =
+        "abcdefghABCDEFGHzzzzzzzz"
+        "abcdefghABCDEFGHyyyyyyyy"
+        "zzzzzzzz12345678"
+        "abcdefghABCDEFGH";
+    return std::vector<uint8_t>(
+        reinterpret_cast<const uint8_t*>(text),
+        reinterpret_cast<const uint8_t*>(text) + std::strlen(text));
+}
+
 static void run_orot_to_libbrotli(const Dataset& ds, int lgwin) {
     char label[160];
     std::snprintf(label, sizeof(label),
@@ -256,6 +267,7 @@ int main() {
         {"text", make_text()},
         {"zeros", std::vector<uint8_t>(64 * 1024, 0)},
         {"random", make_random(64 * 1024)},
+        {"multicopy", make_multi_copy()},
     };
 
     int windows[] = {

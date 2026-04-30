@@ -723,6 +723,28 @@ int main() {
     CHECK(actual == len, "decompress reports actual size");
     CHECK(std::memcmp(text, decompressed.data(), len) == 0, "roundtrip bytes match");
 
+    const char* multi_copy_text =
+        "abcdefghABCDEFGHzzzzzzzz"
+        "abcdefghABCDEFGHyyyyyyyy"
+        "zzzzzzzz12345678"
+        "abcdefghABCDEFGH";
+    const size_t multi_copy_len = std::strlen(multi_copy_text);
+    std::vector<uint8_t> multi_copy_out(orot_brotli_compress_bound(multi_copy_len));
+    n = orot_brotli_compress(multi_copy_text, multi_copy_len,
+                             multi_copy_out.data(), multi_copy_out.size(),
+                             OROT_BROTLI_QUALITY_DEFAULT,
+                             OROT_BROTLI_LGWIN_DEFAULT);
+    CHECK(n > 0, "compress multi-copy stream");
+    decompressed.assign(multi_copy_len + 16, 0);
+    actual = 0;
+    n = orot_brotli_decompress(multi_copy_out.data(), (size_t)n,
+                               decompressed.data(), decompressed.size(),
+                               &actual);
+    CHECK(n == (int)multi_copy_len, "decompress multi-copy stream");
+    CHECK(actual == multi_copy_len, "multi-copy actual size");
+    CHECK(std::memcmp(multi_copy_text, decompressed.data(), multi_copy_len) == 0,
+          "multi-copy roundtrip bytes match");
+
     n = orot_brotli_decompress(out.data(), (size_t)clen,
                                tiny.data(), tiny.size(),
                                nullptr);

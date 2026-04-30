@@ -35,6 +35,7 @@
 | postfix/direct distance parameter compat decode | ✅ |
 | 일반 literal alphabet용 literal-only compressed encoder | ✅ |
 | 단일 back-reference/copy command compressed encoder | ✅ |
+| greedy 다중 back-reference/copy command encoder | ✅ |
 | Brotli fuzz seed corpus 및 실행 스크립트 | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
@@ -62,11 +63,13 @@ uncompressed meta-block fallback을 유지하면서, `quality > 0`이고 단일
 meta-block으로 표현 가능한 입력은 compressed meta-block을 우선 출력한다.
 Literal alphabet이 4개 이하인 경우 simple prefix code를 쓰고, 일반 literal
 alphabet은 256개 literal 전체를 8-bit complex prefix code로 출력한다. 반복이
-발견되면 단일 back-reference/copy command와 distance code를 출력하고, match가
-없으면 literal-only compressed block을 출력한다. Complex prefix code의 repeated
-code-length는 Brotli reference와 같이 읽는 즉시 Huffman space와 symbol position에
-반영한다. Insert/copy-length command table은 Google Brotli decoder의 `kCmdLut`
-생성 규칙과 같은 base/extra 값을 사용한다.
+발견되면 greedy match 탐색으로 여러 insert/copy command와 distance code를
+출력한다. 현재 command/distance prefix code는 simple prefix code 경로를 사용하므로
+각 alphabet이 4개 심볼을 넘으면 literal-only compressed block으로 fallback한다.
+match가 없으면 literal-only compressed block을 출력한다. Complex prefix code의
+repeated code-length는 Brotli reference와 같이 읽는 즉시 Huffman space와 symbol
+position에 반영한다. Insert/copy-length command table은 Google Brotli decoder의
+`kCmdLut` 생성 규칙과 같은 base/extra 값을 사용한다.
 
 ### API
 
@@ -116,6 +119,6 @@ BUILD_DIR=build-fuzz MAX_TOTAL_TIME=60 sh tests/fuzz/run_brotli_fuzz.sh
 
 ## 다음 단계
 
-1. 다중 back-reference command와 match 탐색 확장
-2. encoder용 동적 literal/command/distance prefix code 생성
+1. encoder용 동적 literal/command/distance prefix code 생성
+2. last-distance short code 활용 및 match scoring 개선
 3. Brotli fuzz CI 환경 고정
