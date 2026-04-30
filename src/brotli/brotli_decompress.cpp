@@ -40,14 +40,14 @@ struct CommandLengths {
 
 static bool decode_insert_length(int code, BitReader& br, int& out) noexcept {
     static const uint16_t kBase[24] = {
-        0, 1, 2, 3, 4, 5, 6, 7,
-        8, 10, 14, 18, 26, 34, 50, 66,
-        98, 130, 194, 322, 578, 1090, 2114, 6210
+        0, 1, 2, 3, 4, 5, 6, 8,
+        10, 14, 18, 26, 34, 50, 66, 98,
+        130, 194, 322, 578, 1090, 2114, 6210, 22594
     };
     static const uint8_t kExtra[24] = {
-        0, 0, 0, 0, 0, 0, 1, 2,
-        0, 1, 2, 3, 3, 4, 4, 5,
-        5, 6, 7, 8, 9, 10, 12, 14
+        0, 0, 0, 0, 0, 0, 1, 1,
+        2, 2, 3, 3, 4, 4, 5, 5,
+        6, 7, 8, 9, 10, 12, 14, 24
     };
     if (code < 0 || code >= 24)
         return false;

@@ -27,6 +27,9 @@
 | static dictionary Shift transform 경로 | ✅ |
 | minimal literal-only compressed encoder | ✅ |
 | Brotli whole-buffer API fuzz harness | ✅ |
+| complex prefix repeated code-length 즉시 적용 | ✅ |
+| reference insert-length command table | ✅ |
+| libbrotlienc q5 일반 문장 stream decode | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -49,7 +52,10 @@ WBITS는 RFC 7932의 variable-length mapping을 따르며, static dictionary 참
 distance는 last-distance ring-buffer에 push하지 않는다. Encoder는 기존
 uncompressed meta-block fallback을 유지하면서, `quality > 0`이고 literal
 alphabet이 4개 이하인 단일 블록 입력은 literal-only compressed meta-block으로
-출력한다.
+출력한다. Complex prefix code의 repeated code-length는 Brotli reference와
+같이 읽는 즉시 Huffman space와 symbol position에 반영한다. Insert-length
+command table은 Google Brotli decoder의 `kCmdLut` 생성 규칙과 같은 base/extra
+값을 사용한다.
 
 ### API
 
@@ -89,6 +95,6 @@ int orot_brotli_decompress(
 
 ## 다음 단계
 
-1. Google Brotli encoder가 만든 일반 compressed stream 호환성 확대
+1. 더 큰 q5/q9 텍스트와 다중 block type stream 호환성 확대
 2. 복잡한 literal alphabet용 compressed encoder 구현
 3. fuzz corpus/CI 실행 스크립트 추가

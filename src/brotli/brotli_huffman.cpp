@@ -168,11 +168,12 @@ static bool build_code_length_code(
     static const uint8_t kOrder[18] = {
         1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
     };
-    static const uint8_t kFixedCodeLengths[6] = {2, 4, 3, 2, 2, 4};
-
-    PrefixCode fixed;
-    if (!fixed.build(kFixedCodeLengths, 6))
-        return false;
+    static const uint8_t kPrefixLength[16] = {
+        2, 2, 2, 3, 2, 2, 2, 4, 2, 2, 2, 3, 2, 2, 2, 4
+    };
+    static const uint8_t kPrefixValue[16] = {
+        0, 4, 3, 2, 0, 4, 3, 1, 0, 4, 3, 2, 0, 4, 3, 5
+    };
 
     uint8_t lengths[18];
     std::memset(lengths, 0, sizeof(lengths));
@@ -181,8 +182,12 @@ static bool build_code_length_code(
     int space = 32;
 
     for (int i = hskip; i < 18; ++i) {
-        int len = fixed.decode(br);
-        if (len < 0 || len > 5 || br.error)
+        if (!br.fill(4))
+            return false;
+        uint32_t ix = static_cast<uint32_t>(br.bits & 0x0fu);
+        int len = kPrefixValue[ix];
+        (void)br.read_bits(kPrefixLength[ix]);
+        if (br.error)
             return false;
         lengths[kOrder[i]] = static_cast<uint8_t>(len);
         if (len != 0) {
@@ -203,38 +208,6 @@ static bool build_code_length_code(
     return out.build(lengths, 18);
 }
 
-static bool flush_repeat(
-    uint8_t* lengths,
-    int alphabet_size,
-    int& pos,
-    int repeat_symbol,
-    int repeat_count,
-    int& prev_nonzero,
-    int& space,
-    int& nonzero) noexcept {
-    if (repeat_symbol == 0)
-        return true;
-    if (repeat_count <= 0 || pos + repeat_count > alphabet_size)
-        return false;
-
-    uint8_t value = 0;
-    if (repeat_symbol == 16) {
-        value = static_cast<uint8_t>(prev_nonzero != 0 ? prev_nonzero : 8);
-        prev_nonzero = value;
-    }
-
-    for (int i = 0; i < repeat_count; ++i) {
-        lengths[pos++] = value;
-        if (value != 0) {
-            ++nonzero;
-            space -= 32768 >> value;
-            if (space < 0)
-                return false;
-        }
-    }
-    return true;
-}
-
 static bool read_complex_prefix_code(
     BitReader& br, int hskip, int alphabet_size, PrefixCode& out) noexcept {
     PrefixCode code_length_code;
@@ -245,9 +218,9 @@ static bool read_complex_prefix_code(
     std::memset(lengths, 0, static_cast<size_t>(alphabet_size));
 
     int pos = 0;
-    int prev_nonzero = 0;
-    int repeat_symbol = 0;
     int repeat_count = 0;
+    int repeat_code_len = 0;
+    int prev_nonzero = 8;
     int last_symbol = -1;
     int space = 32768;
     int nonzero = 0;
@@ -266,6 +239,21 @@ static bool read_complex_prefix_code(
         return true;
     };
 
+    auto add_repeat = [&](int len, int count) -> bool {
+        if (count < 0 || pos + count > alphabet_size)
+            return false;
+        for (int i = 0; i < count; ++i) {
+            lengths[pos++] = static_cast<uint8_t>(len);
+            if (len != 0) {
+                ++nonzero;
+                space -= 32768 >> len;
+                if (space < 0)
+                    return false;
+            }
+        }
+        return true;
+    };
+
     while (pos < alphabet_size && space > 0) {
         int sym = code_length_code.decode(br);
         if (sym < 0 || br.error)
@@ -273,45 +261,35 @@ static bool read_complex_prefix_code(
 
         if (sym == 16 || sym == 17) {
             int extra_bits = (sym == 16) ? 2 : 3;
-            int base = (sym == 16) ? 3 : 3;
-            int mult = (sym == 16) ? 4 : 8;
-            int count = base + static_cast<int>(br.read_bits(extra_bits));
+            int new_len = (sym == 16) ? prev_nonzero : 0;
+            int old_repeat = repeat_count;
+            uint32_t repeat_delta_bits = br.read_bits(extra_bits);
             if (br.error)
                 return false;
-
-            if (repeat_symbol == sym) {
-                repeat_count = mult * (repeat_count - 2) + count;
-            } else {
-                if (!flush_repeat(lengths, alphabet_size, pos,
-                                  repeat_symbol, repeat_count, prev_nonzero,
-                                  space, nonzero))
-                    return false;
-                repeat_symbol = sym;
-                repeat_count = count;
+            if (repeat_code_len != new_len) {
+                repeat_count = 0;
+                repeat_code_len = new_len;
+                old_repeat = 0;
             }
+            if (repeat_count > 0)
+                repeat_count = (repeat_count - 2) << extra_bits;
+            repeat_count += static_cast<int>(repeat_delta_bits) + 3;
+            int repeat_delta = repeat_count - old_repeat;
+            if (!add_repeat(repeat_code_len, repeat_delta))
+                return false;
             last_symbol = sym;
             continue;
         }
 
-        if (!flush_repeat(lengths, alphabet_size, pos,
-                          repeat_symbol, repeat_count, prev_nonzero,
-                          space, nonzero))
-            return false;
-        repeat_symbol = 0;
         repeat_count = 0;
+        repeat_code_len = 0;
 
         if (!add_length(sym))
             return false;
         last_symbol = sym;
     }
 
-    if (!flush_repeat(lengths, alphabet_size, pos,
-                      repeat_symbol, repeat_count, prev_nonzero,
-                      space, nonzero))
-        return false;
-
-    if (last_symbol == 0 || last_symbol == 17)
-        return false;
+    (void)last_symbol;
     if (nonzero < 2 || space != 0)
         return false;
 

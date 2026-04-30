@@ -138,6 +138,12 @@ int main() {
         {"abc", {'a', 'b', 'c'}},
         {"phrase", {'h', 'e', 'l', 'l', 'o', ' ', 'h', 'e',
                     'l', 'l', 'o', ' ', 'h', 'e', 'l', 'l', 'o'}},
+        {"quick", {'T', 'h', 'e', ' ', 'q', 'u', 'i', 'c',
+                   'k', ' ', 'b', 'r', 'o', 'w', 'n', ' ',
+                   'f', 'o', 'x', ' ', 'j', 'u', 'm', 'p',
+                   's', ' ', 'o', 'v', 'e', 'r', ' ', 't',
+                   'h', 'e', ' ', 'l', 'a', 'z', 'y', ' ',
+                   'd', 'o', 'g', '.'}},
         {"repeata", std::vector<uint8_t>(32, 'a')},
     };
     for (const auto& ds : small_datasets) {
@@ -145,6 +151,7 @@ int main() {
         run_libbrotli_to_orot(ds, 1, OROT_BROTLI_LGWIN_DEFAULT);
     }
     run_libbrotli_to_orot(small_datasets[2], 5, OROT_BROTLI_LGWIN_DEFAULT);
+    run_libbrotli_to_orot(small_datasets[3], 5, OROT_BROTLI_LGWIN_DEFAULT);
 
     std::printf("\n%d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;

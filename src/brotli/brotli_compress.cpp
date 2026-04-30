@@ -77,14 +77,14 @@ static bool write_simple_prefix_code(
 
 static bool command_symbol_for_insert(size_t len, uint16_t& symbol) noexcept {
     static const uint16_t kBase[24] = {
-        0, 1, 2, 3, 4, 5, 6, 7,
-        8, 10, 14, 18, 26, 34, 50, 66,
-        98, 130, 194, 322, 578, 1090, 2114, 6210
+        0, 1, 2, 3, 4, 5, 6, 8,
+        10, 14, 18, 26, 34, 50, 66, 98,
+        130, 194, 322, 578, 1090, 2114, 6210, 22594
     };
     static const uint8_t kExtra[24] = {
-        0, 0, 0, 0, 0, 0, 1, 2,
-        0, 1, 2, 3, 3, 4, 4, 5,
-        5, 6, 7, 8, 9, 10, 12, 14
+        0, 0, 0, 0, 0, 0, 1, 1,
+        2, 2, 3, 3, 4, 4, 5, 5,
+        6, 7, 8, 9, 10, 12, 14, 24
     };
     static const uint8_t kInsertBase[11] = {
         0, 0, 0, 0, 8, 8, 0, 16, 8, 16, 16
@@ -106,14 +106,14 @@ static bool command_symbol_for_insert(size_t len, uint16_t& symbol) noexcept {
 
 static bool write_insert_extra(BitWriter& bw, uint16_t symbol, size_t len) noexcept {
     static const uint16_t kBase[24] = {
-        0, 1, 2, 3, 4, 5, 6, 7,
-        8, 10, 14, 18, 26, 34, 50, 66,
-        98, 130, 194, 322, 578, 1090, 2114, 6210
+        0, 1, 2, 3, 4, 5, 6, 8,
+        10, 14, 18, 26, 34, 50, 66, 98,
+        130, 194, 322, 578, 1090, 2114, 6210, 22594
     };
     static const uint8_t kExtra[24] = {
-        0, 0, 0, 0, 0, 0, 1, 2,
-        0, 1, 2, 3, 3, 4, 4, 5,
-        5, 6, 7, 8, 9, 10, 12, 14
+        0, 0, 0, 0, 0, 0, 1, 1,
+        2, 2, 3, 3, 4, 4, 5, 5,
+        6, 7, 8, 9, 10, 12, 14, 24
     };
     static const uint8_t kInsertBase[11] = {
         0, 0, 0, 0, 8, 8, 0, 16, 8, 16, 16
