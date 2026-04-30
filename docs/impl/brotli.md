@@ -123,6 +123,17 @@ LLVM/clang 환경에서는 다음 스크립트로 Brotli seed corpus를 준비�
 BUILD_DIR=build-fuzz MAX_TOTAL_TIME=60 sh tests/fuzz/run_brotli_fuzz.sh
 ```
 
+## 벤치마크
+
+`bench_brotli_compare`는 `libbrotli`와 OROT의 압축률, encode/decode 처리량,
+양방향 교차 decode 호환성을 같은 dataset에서 측정한다.
+
+```sh
+./build-bench/tests/bench_brotli_compare --dataset=all --iters=30 --quality=5 --lgwin=22
+```
+
+`--dataset`은 `text`, `mixed`, `random`, `all`을 받는다.
+
 ## 다음 단계
 
 1. encoder용 빈도 기반 literal prefix code 생성
