@@ -10,25 +10,17 @@ namespace orot { namespace brotli {
 
 static int read_wbits(BitReader& br) noexcept {
     if (br.read_bits(1) == 0) return 16;
-    uint32_t suffix = br.read_bits(3);
+    uint32_t n = br.read_bits(3);
     if (br.error) return 0;
-    switch (suffix) {
-    case 0b001: {
-        uint32_t top = br.read_bits(3);
-        if (br.error) return 0;
-        if (top == 0) return 17;
-        if (top <= 6) return 9 + (int)top;
+    if (n != 0)
+        return 17 + static_cast<int>(n);
+    n = br.read_bits(3);
+    if (br.error) return 0;
+    if (n == 1)
         return 0;
-    }
-    case 0b011: return 18;
-    case 0b101: return 19;
-    case 0b111: return 20;
-    case 0b100: return 21;
-    case 0b110: return 22;
-    case 0b010: return 23;
-    case 0b000: return 24;
-    default: return 0;
-    }
+    if (n != 0)
+        return 8 + static_cast<int>(n);
+    return 17;
 }
 
 static int decode_mnibbles(uint32_t code) noexcept {
@@ -409,6 +401,7 @@ static BrotliDecodeStatus decode_compressed_meta_block(
         if (distance <= 0)
             return BrotliDecodeStatus::DataError;
 
+        bool used_dictionary = false;
         if (static_cast<size_t>(distance) > out_pos) {
             if (out_pos > dst_cap)
                 return BrotliDecodeStatus::NeedOutput;
@@ -421,6 +414,7 @@ static BrotliDecodeStatus decode_compressed_meta_block(
                 return BrotliDecodeStatus::DataError;
             out_pos += word_len;
             produced += word_len;
+            used_dictionary = true;
         } else {
             if ((size_t)lengths.copy_len > meta_len - produced)
                 return BrotliDecodeStatus::DataError;
@@ -432,7 +426,7 @@ static BrotliDecodeStatus decode_compressed_meta_block(
             out_pos += static_cast<size_t>(lengths.copy_len);
             produced += static_cast<size_t>(lengths.copy_len);
         }
-        if (should_push_distance)
+        if (should_push_distance && !used_dictionary)
             push_distance(distance, last_distances);
     }
 

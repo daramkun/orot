@@ -22,6 +22,8 @@
 | UTF8/Signed literal context lookup table | ✅ |
 | libbrotlienc low-quality stream -> orot decode 호환 테스트 | ✅ |
 | static dictionary byte table + identity/omit/uppercase transforms | ✅ |
+| RFC 7932 WBITS decoder mapping | ✅ |
+| static dictionary distance ring-buffer 예외 처리 | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -39,7 +41,9 @@ LSB6/MSB6/UTF8/Signed literal context, copy-length distance context를 해제할
 있다. libbrotlienc의 low-quality 짧은 스트림과 일부 반복 데이터 compressed
 stream을 해제할 수 있으며, static dictionary는 전체 byte table과
 identity/omit/uppercase transform 경로를 사용한다. Shift transform 등 미지원
-dictionary 경로는 `-4`를 반환한다.
+dictionary 경로는 `-4`를 반환한다. WBITS는 RFC 7932의 variable-length
+mapping을 따르며, static dictionary 참조 distance는 last-distance
+ring-buffer에 push하지 않는다.
 
 ### API
 
