@@ -126,7 +126,8 @@ orot/
 │   └── fuzz/
 │       ├── fuzz_roundtrip.cpp   # libfuzzer compress+decompress
 │       ├── fuzz_decompress.cpp  # libfuzzer decompress only
-│       └── fuzz_zstd_decompress.cpp # libfuzzer Zstandard frame decompress only
+│       ├── fuzz_zstd_decompress.cpp # libfuzzer Zstandard frame decompress only
+│       └── fuzz_brotli.cpp      # libfuzzer Brotli whole-buffer API harness
 ├── cmake/
 │   ├── DetectSIMD.cmake      # CPU 기능 프로빙
 │   ├── CompilerFlags.cmake   # LTO, 경고, 최적화

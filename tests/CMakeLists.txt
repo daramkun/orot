@@ -101,6 +101,18 @@ if(OROT_DEFLATE_FUZZ)
   target_link_options(fuzz_zstd_decompress PRIVATE
         -fsanitize=fuzzer,address
     )
+
+  add_executable(fuzz_brotli fuzz/fuzz_brotli.cpp)
+  target_link_libraries(fuzz_brotli PRIVATE orot)
+  target_include_directories(fuzz_brotli PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+  target_compile_options(fuzz_brotli PRIVATE
+        -fsanitize=fuzzer,address -O1 -g
+    )
+  target_link_options(fuzz_brotli PRIVATE
+        -fsanitize=fuzzer,address
+    )
 endif()
 
 # ── Benchmarks (-DOROT_BENCHMARK=ON) ─────────────────────────────────────────

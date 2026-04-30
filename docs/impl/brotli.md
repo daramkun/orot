@@ -24,11 +24,14 @@
 | static dictionary byte table + identity/omit/uppercase transforms | ✅ |
 | RFC 7932 WBITS decoder mapping | ✅ |
 | static dictionary distance ring-buffer 예외 처리 | ✅ |
+| static dictionary Shift transform 경로 | ✅ |
+| minimal literal-only compressed encoder | ✅ |
+| Brotli whole-buffer API fuzz harness | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
-| compressed meta-block encoder | ⬜ |
-| 퍼즈 테스트 | ⬜ |
+| compressed meta-block encoder | ✅ |
+| 퍼즈 테스트 | ✅ |
 
 ---
 
@@ -41,9 +44,12 @@ LSB6/MSB6/UTF8/Signed literal context, copy-length distance context를 해제할
 있다. libbrotlienc의 low-quality 짧은 스트림과 일부 반복 데이터 compressed
 stream을 해제할 수 있으며, static dictionary는 전체 byte table과
 identity/omit/uppercase transform 경로를 사용한다. Shift transform 등 미지원
-dictionary 경로는 `-4`를 반환한다. WBITS는 RFC 7932의 variable-length
-mapping을 따르며, static dictionary 참조 distance는 last-distance
-ring-buffer에 push하지 않는다.
+dictionary 경로는 Google Brotli와 동일한 UTF-8 scalar shift 동작을 수행한다.
+WBITS는 RFC 7932의 variable-length mapping을 따르며, static dictionary 참조
+distance는 last-distance ring-buffer에 push하지 않는다. Encoder는 기존
+uncompressed meta-block fallback을 유지하면서, `quality > 0`이고 literal
+alphabet이 4개 이하인 단일 블록 입력은 literal-only compressed meta-block으로
+출력한다.
 
 ### API
 
@@ -83,7 +89,6 @@ int orot_brotli_decompress(
 
 ## 다음 단계
 
-1. static dictionary Shift transform 지원 추가
-2. Google Brotli encoder가 만든 일반 compressed stream 호환성 확대
-3. minimal compressed encoder 구현
-4. 퍼즈 테스트 추가
+1. Google Brotli encoder가 만든 일반 compressed stream 호환성 확대
+2. 복잡한 literal alphabet용 compressed encoder 구현
+3. fuzz corpus/CI 실행 스크립트 추가

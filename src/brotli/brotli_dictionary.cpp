@@ -123,6 +123,54 @@ static int uppercase(uint8_t* p) noexcept {
     return 3;
 }
 
+static int shift(uint8_t* word, int word_len, uint16_t parameter) noexcept {
+    uint32_t scalar =
+        (parameter & 0x7fffu) + (0x1000000u - (parameter & 0x8000u));
+    if (word[0] < 0x80) {
+        scalar += word[0];
+        word[0] = static_cast<uint8_t>(scalar & 0x7fu);
+        return 1;
+    }
+    if (word[0] < 0xc0)
+        return 1;
+    if (word[0] < 0xe0) {
+        if (word_len < 2)
+            return 1;
+        scalar += static_cast<uint32_t>(
+            (word[1] & 0x3fu) | ((word[0] & 0x1fu) << 6u));
+        word[0] = static_cast<uint8_t>(0xc0u | ((scalar >> 6u) & 0x1fu));
+        word[1] = static_cast<uint8_t>((word[1] & 0xc0u) | (scalar & 0x3fu));
+        return 2;
+    }
+    if (word[0] < 0xf0) {
+        if (word_len < 3)
+            return word_len;
+        scalar += static_cast<uint32_t>(
+            (word[2] & 0x3fu) | ((word[1] & 0x3fu) << 6u) |
+            ((word[0] & 0x0fu) << 12u));
+        word[0] = static_cast<uint8_t>(0xe0u | ((scalar >> 12u) & 0x0fu));
+        word[1] = static_cast<uint8_t>((word[1] & 0xc0u) |
+                                       ((scalar >> 6u) & 0x3fu));
+        word[2] = static_cast<uint8_t>((word[2] & 0xc0u) | (scalar & 0x3fu));
+        return 3;
+    }
+    if (word[0] < 0xf8) {
+        if (word_len < 4)
+            return word_len;
+        scalar += static_cast<uint32_t>(
+            (word[3] & 0x3fu) | ((word[2] & 0x3fu) << 6u) |
+            ((word[1] & 0x3fu) << 12u) | ((word[0] & 0x07u) << 18u));
+        word[0] = static_cast<uint8_t>(0xf0u | ((scalar >> 18u) & 0x07u));
+        word[1] = static_cast<uint8_t>((word[1] & 0xc0u) |
+                                       ((scalar >> 12u) & 0x3fu));
+        word[2] = static_cast<uint8_t>((word[2] & 0xc0u) |
+                                       ((scalar >> 6u) & 0x3fu));
+        word[3] = static_cast<uint8_t>((word[3] & 0xc0u) | (scalar & 0x3fu));
+        return 4;
+    }
+    return 1;
+}
+
 static const uint8_t* prefix_suffix(int id) noexcept {
     return reinterpret_cast<const uint8_t*>(
         kPrefixSuffix + kPrefixSuffixMap[id]);
@@ -143,8 +191,6 @@ static bool apply_transform(
     const uint8_t prefix_id = kTransformsData[transform_id * 3];
     const uint8_t type = kTransformsData[transform_id * 3 + 1];
     const uint8_t suffix_id = kTransformsData[transform_id * 3 + 2];
-    if (type == kShiftFirst || type == kShiftAll)
-        return false;
 
     size_t pos = 0;
     const uint8_t* prefix = prefix_suffix(prefix_id);
@@ -174,6 +220,16 @@ static bool apply_transform(
         int remaining = word_len;
         while (remaining > 0) {
             int step = uppercase(p);
+            p += step;
+            remaining -= step;
+        }
+    } else if (type == kShiftFirst && word_len > 0) {
+        shift(dst + pos, word_len, 0);
+    } else if (type == kShiftAll) {
+        uint8_t* p = dst + pos;
+        int remaining = word_len;
+        while (remaining > 0) {
+            int step = shift(p, remaining, 0);
             p += step;
             remaining -= step;
         }
