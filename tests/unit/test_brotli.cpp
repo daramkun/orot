@@ -759,6 +759,30 @@ int main() {
                                nullptr);
     CHECK(n == -4, "valid compressed meta-block reaches unsupported body decoder");
 
+    const uint8_t brotli_cli_q0_abc[] = {
+        0x0f, 0x01, 0x80, 0x61, 0x62, 0x63, 0x03
+    };
+    n = orot_brotli_decompress(brotli_cli_q0_abc,
+                               sizeof(brotli_cli_q0_abc),
+                               decompressed.data(), decompressed.size(),
+                               &actual);
+    CHECK(n == 3, "decompress brotli CLI q0 abc stream");
+    CHECK(actual == 3, "brotli CLI q0 abc actual size");
+    CHECK(std::memcmp(decompressed.data(), "abc", 3) == 0,
+          "brotli CLI q0 abc output bytes");
+
+    const uint8_t brotli_cli_q5_repeated_a[] = {
+        0x1f, 0x1f, 0x00, 0x00, 0x24, 0xc2, 0xa2, 0x99, 0x40, 0x02
+    };
+    n = orot_brotli_decompress(brotli_cli_q5_repeated_a,
+                               sizeof(brotli_cli_q5_repeated_a),
+                               decompressed.data(), decompressed.size(),
+                               &actual);
+    CHECK(n == 32, "decompress brotli CLI q5 repeated-a stream");
+    CHECK(actual == 32, "brotli CLI q5 repeated-a actual size");
+    CHECK(std::memcmp(decompressed.data(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 32) == 0,
+          "brotli CLI q5 repeated-a output bytes");
+
     std::vector<uint8_t> empty_compressed(orot_brotli_compress_bound(0));
     n = orot_brotli_compress(nullptr, 0,
                              empty_compressed.data(), empty_compressed.size(),

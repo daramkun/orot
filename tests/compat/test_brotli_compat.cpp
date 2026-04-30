@@ -4,6 +4,7 @@
  */
 
 #include <brotli/decode.h>
+#include <brotli/encode.h>
 
 #include "orot/brotli.h"
 
@@ -77,6 +78,44 @@ static void run_orot_to_libbrotli(const Dataset& ds, int lgwin) {
     ++passes;
 }
 
+static void run_libbrotli_to_orot(const Dataset& ds, int quality, int lgwin) {
+    char label[180];
+    std::snprintf(label, sizeof(label),
+                  "Brotli libbrotlienc->orot ds=%-8s q=%d lgwin=%d",
+                  ds.name, quality, lgwin);
+
+    size_t compressed_size = BrotliEncoderMaxCompressedSize(ds.data.size());
+    std::vector<uint8_t> compressed(compressed_size);
+    BROTLI_BOOL ok = BrotliEncoderCompress(
+        quality, lgwin, BROTLI_MODE_GENERIC,
+        ds.data.size(), ds.data.data(),
+        &compressed_size, compressed.data());
+    if (!ok) {
+        std::fprintf(stderr, "FAIL: %s (libbrotlienc failed)\n", label);
+        ++failures;
+        return;
+    }
+
+    std::vector<uint8_t> decoded(ds.data.size() + 16);
+    size_t actual = 0;
+    int dlen = orot_brotli_decompress(
+        compressed.data(), compressed_size,
+        decoded.data(), decoded.size(),
+        &actual);
+
+    if (dlen != static_cast<int>(ds.data.size()) ||
+        actual != ds.data.size() ||
+        (!ds.data.empty() && std::memcmp(ds.data.data(), decoded.data(), ds.data.size()) != 0)) {
+        std::fprintf(stderr, "FAIL: %s (orot returned=%d got=%zu expected=%zu)\n",
+                     label, dlen, actual, ds.data.size());
+        ++failures;
+        return;
+    }
+
+    std::printf("PASS: %s\n", label);
+    ++passes;
+}
+
 int main() {
     Dataset datasets[] = {
         {"empty", {}},
@@ -94,6 +133,16 @@ int main() {
     for (const auto& ds : datasets)
         for (int lgwin : windows)
             run_orot_to_libbrotli(ds, lgwin);
+
+    Dataset small_datasets[] = {
+        {"abc", {'a', 'b', 'c'}},
+        {"phrase", {'h', 'e', 'l', 'l', 'o', ' ', 'h', 'e',
+                    'l', 'l', 'o', ' ', 'h', 'e', 'l', 'l', 'o'}},
+    };
+    for (const auto& ds : small_datasets) {
+        run_libbrotli_to_orot(ds, 0, OROT_BROTLI_LGWIN_DEFAULT);
+        run_libbrotli_to_orot(ds, 1, OROT_BROTLI_LGWIN_DEFAULT);
+    }
 
     std::printf("\n%d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;
