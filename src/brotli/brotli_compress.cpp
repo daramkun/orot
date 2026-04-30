@@ -10,7 +10,7 @@ static constexpr size_t kMaxMetaBlockSize = 1u << 24;
 
 size_t brotli_compress_bound(size_t src_len) noexcept {
     size_t blocks = (src_len + kMaxMetaBlockSize - 1) / kMaxMetaBlockSize;
-    return src_len + 16 + blocks * 8;
+    return src_len + 512 + blocks * 16;
 }
 
 static bool write_wbits(BitWriter& bw, int lgwin) noexcept {
@@ -124,6 +124,140 @@ static bool write_insert_extra(BitWriter& bw, uint16_t symbol, size_t len) noexc
     return bw.write_bits(static_cast<uint32_t>(len - kBase[code]), kExtra[code]);
 }
 
+static bool length_code(int value, const uint16_t* base, const uint8_t* extra, int& code) noexcept {
+    if (value < 0)
+        return false;
+    for (int i = 0; i < 24; ++i) {
+        int count = 1 << extra[i];
+        if (value >= base[i] && value < base[i] + count) {
+            code = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool command_symbol_for_insert_copy(
+    size_t insert_len,
+    size_t copy_len,
+    uint16_t& symbol) noexcept
+{
+    static const uint16_t kInsertBaseValue[24] = {
+        0, 1, 2, 3, 4, 5, 6, 8,
+        10, 14, 18, 26, 34, 50, 66, 98,
+        130, 194, 322, 578, 1090, 2114, 6210, 22594
+    };
+    static const uint8_t kInsertExtra[24] = {
+        0, 0, 0, 0, 0, 0, 1, 1,
+        2, 2, 3, 3, 4, 4, 5, 5,
+        6, 7, 8, 9, 10, 12, 14, 24
+    };
+    static const uint16_t kCopyBaseValue[24] = {
+        2, 3, 4, 5, 6, 7, 8, 9,
+        10, 12, 14, 18, 22, 30, 38, 54,
+        70, 102, 134, 198, 326, 582, 1094, 2118
+    };
+    static const uint8_t kCopyExtra[24] = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 2, 2, 3, 3, 4, 4,
+        5, 5, 6, 7, 8, 9, 10, 24
+    };
+    static const uint8_t kInsertBase[11] = {
+        0, 0, 0, 0, 8, 8, 0, 16, 8, 16, 16
+    };
+    static const uint8_t kCopyBase[11] = {
+        0, 8, 0, 8, 0, 8, 16, 0, 16, 8, 16
+    };
+
+    int insert_code = 0;
+    int copy_code = 0;
+    if (!length_code(static_cast<int>(insert_len), kInsertBaseValue,
+                     kInsertExtra, insert_code) ||
+        !length_code(static_cast<int>(copy_len), kCopyBaseValue,
+                     kCopyExtra, copy_code))
+        return false;
+
+    for (int group = 2; group < 11; ++group) {
+        if (insert_code < kInsertBase[group] ||
+            insert_code >= kInsertBase[group] + 8 ||
+            copy_code < kCopyBase[group] ||
+            copy_code >= kCopyBase[group] + 8)
+            continue;
+        symbol = static_cast<uint16_t>(
+            group * 64 + ((insert_code - kInsertBase[group]) << 3)
+            + (copy_code - kCopyBase[group]));
+        return true;
+    }
+    return false;
+}
+
+static bool write_command_extra(
+    BitWriter& bw,
+    uint16_t symbol,
+    size_t insert_len,
+    size_t copy_len) noexcept
+{
+    static const uint16_t kInsertBaseValue[24] = {
+        0, 1, 2, 3, 4, 5, 6, 8,
+        10, 14, 18, 26, 34, 50, 66, 98,
+        130, 194, 322, 578, 1090, 2114, 6210, 22594
+    };
+    static const uint8_t kInsertExtra[24] = {
+        0, 0, 0, 0, 0, 0, 1, 1,
+        2, 2, 3, 3, 4, 4, 5, 5,
+        6, 7, 8, 9, 10, 12, 14, 24
+    };
+    static const uint16_t kCopyBaseValue[24] = {
+        2, 3, 4, 5, 6, 7, 8, 9,
+        10, 12, 14, 18, 22, 30, 38, 54,
+        70, 102, 134, 198, 326, 582, 1094, 2118
+    };
+    static const uint8_t kCopyExtra[24] = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 2, 2, 3, 3, 4, 4,
+        5, 5, 6, 7, 8, 9, 10, 24
+    };
+    static const uint8_t kInsertBase[11] = {
+        0, 0, 0, 0, 8, 8, 0, 16, 8, 16, 16
+    };
+    static const uint8_t kCopyBase[11] = {
+        0, 8, 0, 8, 0, 8, 16, 0, 16, 8, 16
+    };
+
+    int group = symbol >> 6;
+    int low = symbol & 63;
+    int insert_code = kInsertBase[group] + ((low >> 3) & 7);
+    int copy_code = kCopyBase[group] + (low & 7);
+    return bw.write_bits(static_cast<uint32_t>(insert_len - kInsertBaseValue[insert_code]),
+                         kInsertExtra[insert_code]) &&
+           bw.write_bits(static_cast<uint32_t>(copy_len - kCopyBaseValue[copy_code]),
+                         kCopyExtra[copy_code]);
+}
+
+static bool distance_code_for_distance(
+    size_t distance,
+    uint16_t& code,
+    uint32_t& extra,
+    int& extra_bits) noexcept
+{
+    if (distance == 0)
+        return false;
+    for (int bucket = 0; bucket < 48; ++bucket) {
+        int nbits = (bucket >> 1) + 1;
+        int offset = ((2 + (bucket & 1)) << nbits) - 4;
+        int base = offset + 1;
+        int limit = base + (1 << nbits);
+        if (distance < static_cast<size_t>(base) ||
+            distance >= static_cast<size_t>(limit))
+            continue;
+        code = static_cast<uint16_t>(16 + bucket);
+        extra = static_cast<uint32_t>(distance - static_cast<size_t>(base));
+        extra_bits = nbits;
+        return true;
+    }
+    return false;
+}
+
 static int collect_literals(
     const uint8_t* src,
     size_t src_len,
@@ -141,6 +275,7 @@ static int collect_literals(
         seen[b] = true;
         symbols[count++] = b;
     }
+    std::sort(symbols, symbols + count);
     return count;
 }
 
@@ -172,6 +307,33 @@ static bool write_simple_literal_code(BitWriter& bw, int index, int count) noexc
     }
 }
 
+static bool write_prefix_bits(BitWriter& bw, uint32_t code, int len) noexcept {
+    uint32_t reversed = 0;
+    for (int i = 0; i < len; ++i)
+        reversed = (reversed << 1) | ((code >> i) & 1u);
+    return bw.write_bits(reversed, len);
+}
+
+static bool write_fixed_8_literal_prefix_code(BitWriter& bw) noexcept {
+    static const uint8_t kOrder[18] = {
+        1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    };
+
+    if (!bw.write_bits(0, 2))
+        return false;
+
+    for (int i = 0; i < 18; ++i) {
+        if (kOrder[i] == 8) {
+            if (!bw.write_bits(0b0111, 4))
+                return false;
+        } else {
+            if (!bw.write_bits(0, 2))
+                return false;
+        }
+    }
+    return true;
+}
+
 static bool write_compressed_literal_block(
     BitWriter& bw,
     const uint8_t* src,
@@ -183,7 +345,7 @@ static bool write_compressed_literal_block(
     uint16_t literal_symbols[4] = {};
     int literal_count = collect_literals(src, src_len, literal_symbols);
     uint16_t command_symbol = 0;
-    if (literal_count == 0 || !command_symbol_for_insert(src_len, command_symbol))
+    if (!command_symbol_for_insert(src_len, command_symbol))
         return false;
 
     uint16_t command_symbols[1] = { command_symbol };
@@ -202,7 +364,9 @@ static bool write_compressed_literal_block(
     if (!bw.write_bits(0, 1) || !bw.write_bits(0, 1))
         return false;
 
-    if (!write_simple_prefix_code(bw, 256, literal_symbols, literal_count) ||
+    if (!((literal_count > 0 &&
+           write_simple_prefix_code(bw, 256, literal_symbols, literal_count)) ||
+          write_fixed_8_literal_prefix_code(bw)) ||
         !write_simple_prefix_code(bw, 704, command_symbols, 1) ||
         !write_simple_prefix_code(bw, 64, distance_symbols, 1))
         return false;
@@ -210,9 +374,125 @@ static bool write_compressed_literal_block(
     if (!write_insert_extra(bw, command_symbol, src_len))
         return false;
     for (size_t i = 0; i < src_len; ++i) {
-        int index = literal_symbol_index(literal_symbols, literal_count, src[i]);
-        if (!write_simple_literal_code(bw, index, literal_count))
+        if (literal_count > 0) {
+            int index = literal_symbol_index(literal_symbols, literal_count, src[i]);
+            if (!write_simple_literal_code(bw, index, literal_count))
+                return false;
+        } else {
+            if (!write_prefix_bits(bw, src[i], 8))
+                return false;
+        }
+    }
+    return true;
+}
+
+struct Match {
+    size_t pos = 0;
+    size_t len = 0;
+    size_t distance = 0;
+};
+
+static Match find_match(const uint8_t* src, size_t src_len) noexcept {
+    Match best;
+    if (src_len < 8)
+        return best;
+
+    for (size_t pos = 4; pos + 4 <= src_len; ++pos) {
+        size_t max_distance = std::min<size_t>(pos, 1024);
+        for (size_t distance = 1; distance <= max_distance; ++distance) {
+            if (src[pos] != src[pos - distance] ||
+                src[pos + 1] != src[pos - distance + 1] ||
+                src[pos + 2] != src[pos - distance + 2] ||
+                src[pos + 3] != src[pos - distance + 3])
+                continue;
+            size_t len = 4;
+            while (pos + len < src_len &&
+                   len < 65536 &&
+                   src[pos + len] == src[pos - distance + len])
+                ++len;
+            if (len > best.len) {
+                best = Match{pos, len, distance};
+                if (len >= src_len - pos)
+                    return best;
+            }
+        }
+    }
+    if (best.len < 8)
+        return Match{};
+    return best;
+}
+
+static bool write_command_symbol(
+    BitWriter& bw,
+    const uint16_t* symbols,
+    int count,
+    uint16_t symbol) noexcept
+{
+    for (int i = 0; i < count; ++i) {
+        if (symbols[i] != symbol)
+            continue;
+        return write_simple_literal_code(bw, i, count);
+    }
+    return false;
+}
+
+static bool write_compressed_copy_block(
+    BitWriter& bw,
+    const uint8_t* src,
+    size_t src_len,
+    const Match& match) noexcept
+{
+    uint16_t copy_command = 0;
+    uint16_t final_command = 0;
+    uint16_t distance_symbol = 0;
+    uint32_t distance_extra = 0;
+    int distance_extra_bits = 0;
+    size_t tail_len = src_len - (match.pos + match.len);
+
+    if (!command_symbol_for_insert_copy(match.pos, match.len, copy_command) ||
+        !command_symbol_for_insert(tail_len, final_command) ||
+        !distance_code_for_distance(match.distance, distance_symbol,
+                                    distance_extra, distance_extra_bits))
+        return false;
+
+    uint16_t command_symbols[2] = {copy_command, final_command};
+    int command_count = (copy_command == final_command) ? 1 : 2;
+    std::sort(command_symbols, command_symbols + command_count);
+    uint16_t distance_symbols[1] = {distance_symbol};
+
+    if (!bw.write_bits(0, 1) || !write_meta_len(bw, src_len) ||
+        !bw.write_bits(0, 1))
+        return false;
+    if (!bw.write_bits(0, 1) || !bw.write_bits(0, 1) ||
+        !bw.write_bits(0, 1))
+        return false;
+    if (!bw.write_bits(0, 2) || !bw.write_bits(0, 4) ||
+        !bw.write_bits(0, 2))
+        return false;
+    if (!bw.write_bits(0, 1) || !bw.write_bits(0, 1))
+        return false;
+
+    if (!write_fixed_8_literal_prefix_code(bw) ||
+        !write_simple_prefix_code(bw, 704, command_symbols, command_count) ||
+        !write_simple_prefix_code(bw, 64, distance_symbols, 1))
+        return false;
+
+    if (!write_command_symbol(bw, command_symbols, command_count, copy_command) ||
+        !write_command_extra(bw, copy_command, match.pos, match.len))
+        return false;
+    for (size_t i = 0; i < match.pos; ++i)
+        if (!write_prefix_bits(bw, src[i], 8))
             return false;
+    if (!bw.write_bits(distance_extra, distance_extra_bits))
+        return false;
+
+    if (tail_len > 0) {
+        if (!write_command_symbol(bw, command_symbols, command_count, final_command) ||
+            !write_insert_extra(bw, final_command, tail_len))
+            return false;
+        for (size_t i = match.pos + match.len; i < src_len; ++i)
+            if (!write_prefix_bits(bw, src[i], 8))
+                return false;
     }
     return true;
 }
@@ -233,10 +513,18 @@ size_t brotli_compress(
 
     size_t pos = 0;
     if (quality > 0 && src_len > 0 && src_len <= kMaxMetaBlockSize) {
-        uint16_t literal_symbols[4] = {};
+        Match match = find_match(input, src_len);
+        if (match.len > 0) {
+            if (!write_compressed_copy_block(bw, input, src_len, match))
+                return 0;
+            if (!bw.write_bits(1, 1)) return 0;
+            if (!bw.write_bits(1, 1)) return 0;
+            if (!bw.finish_zero()) return 0;
+            return bw.overflow ? 0 : bw.bytes_written(dst);
+        }
+
         uint16_t command_symbol = 0;
-        bool eligible = collect_literals(input, src_len, literal_symbols) != 0
-            && command_symbol_for_insert(src_len, command_symbol);
+        bool eligible = command_symbol_for_insert(src_len, command_symbol);
         if (eligible) {
             if (!write_compressed_literal_block(bw, input, src_len))
                 return 0;

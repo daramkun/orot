@@ -30,6 +30,12 @@
 | complex prefix repeated code-length 즉시 적용 | ✅ |
 | reference insert-length command table | ✅ |
 | libbrotlienc q5 일반 문장 stream decode | ✅ |
+| libbrotlienc q5/q9 장문 텍스트 stream decode | ✅ |
+| libbrotlienc 다중 block/context 분포 stream decode | ✅ |
+| postfix/direct distance parameter compat decode | ✅ |
+| 일반 literal alphabet용 literal-only compressed encoder | ✅ |
+| 단일 back-reference/copy command compressed encoder | ✅ |
+| Brotli fuzz seed corpus 및 실행 스크립트 | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -49,13 +55,18 @@ stream을 해제할 수 있으며, static dictionary는 전체 byte table과
 identity/omit/uppercase transform 경로를 사용한다. Shift transform 등 미지원
 dictionary 경로는 Google Brotli와 동일한 UTF-8 scalar shift 동작을 수행한다.
 WBITS는 RFC 7932의 variable-length mapping을 따르며, static dictionary 참조
-distance는 last-distance ring-buffer에 push하지 않는다. Encoder는 기존
-uncompressed meta-block fallback을 유지하면서, `quality > 0`이고 literal
-alphabet이 4개 이하인 단일 블록 입력은 literal-only compressed meta-block으로
-출력한다. Complex prefix code의 repeated code-length는 Brotli reference와
-같이 읽는 즉시 Huffman space와 symbol position에 반영한다. Insert-length
-command table은 Google Brotli decoder의 `kCmdLut` 생성 규칙과 같은 base/extra
-값을 사용한다.
+distance는 last-distance ring-buffer에 push하지 않는다. Decoder compat는
+libbrotlienc q5/q9 장문 텍스트, 분포 변화가 큰 block/context 샘플,
+`NPOSTFIX/NDIRECT`를 강제한 distance parameter 샘플을 포함한다. Encoder는 기존
+uncompressed meta-block fallback을 유지하면서, `quality > 0`이고 단일
+meta-block으로 표현 가능한 입력은 compressed meta-block을 우선 출력한다.
+Literal alphabet이 4개 이하인 경우 simple prefix code를 쓰고, 일반 literal
+alphabet은 256개 literal 전체를 8-bit complex prefix code로 출력한다. 반복이
+발견되면 단일 back-reference/copy command와 distance code를 출력하고, match가
+없으면 literal-only compressed block을 출력한다. Complex prefix code의 repeated
+code-length는 Brotli reference와 같이 읽는 즉시 Huffman space와 symbol position에
+반영한다. Insert/copy-length command table은 Google Brotli decoder의 `kCmdLut`
+생성 규칙과 같은 base/extra 값을 사용한다.
 
 ### API
 
@@ -93,8 +104,18 @@ int orot_brotli_decompress(
 
 ---
 
+## Fuzz 실행
+
+macOS Xcode clang은 libFuzzer runtime 링크가 실패할 수 있다. 실행 가능한
+LLVM/clang 환경에서는 다음 스크립트로 Brotli seed corpus를 준비하고 fuzz target을
+빌드/실행한다.
+
+```sh
+BUILD_DIR=build-fuzz MAX_TOTAL_TIME=60 sh tests/fuzz/run_brotli_fuzz.sh
+```
+
 ## 다음 단계
 
-1. 더 큰 q5/q9 텍스트와 다중 block type stream 호환성 확대
-2. 복잡한 literal alphabet용 compressed encoder 구현
-3. fuzz corpus/CI 실행 스크립트 추가
+1. 다중 back-reference command와 match 탐색 확장
+2. encoder용 동적 literal/command/distance prefix code 생성
+3. Brotli fuzz CI 환경 고정

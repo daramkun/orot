@@ -32,6 +32,71 @@ static std::vector<uint8_t> make_text() {
     return out;
 }
 
+static std::vector<uint8_t> make_long_repeated_text() {
+    std::vector<uint8_t> out;
+    const char* paragraphs[] = {
+        "Brotli compressed meta-block compatibility depends on repeated "
+        "phrases, literal contexts, and copy commands staying in sync. ",
+        "The decoder should accept reference encoder output across several "
+        "commands without losing the last-distance ring buffer. ",
+        "Long text payloads also exercise context-map selection for ordinary "
+        "ASCII prose with punctuation, numbers 1234567890, and spacing. ",
+    };
+    for (int round = 0; round < 700; ++round) {
+        const char* text = paragraphs[round % 3];
+        size_t n = std::strlen(text);
+        out.insert(out.end(), reinterpret_cast<const uint8_t*>(text),
+                   reinterpret_cast<const uint8_t*>(text) + n);
+    }
+    return out;
+}
+
+static std::vector<uint8_t> make_context_text() {
+    std::vector<uint8_t> out;
+    const char* fragments[] = {
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa\n",
+        "HTTP/2 headers: content-type=text/plain; cache-control=no-cache\n",
+        "Signed bytes and UTF-8-ish text: Cafe naive resume jalapeno.\n",
+        "path=/var/tmp/orot/brotli; query=literal_context&distance=copy\n",
+    };
+    for (int round = 0; round < 512; ++round) {
+        const char* text = fragments[round % 4];
+        size_t n = std::strlen(text);
+        out.insert(out.end(), reinterpret_cast<const uint8_t*>(text),
+                   reinterpret_cast<const uint8_t*>(text) + n);
+    }
+    return out;
+}
+
+static std::vector<uint8_t> make_block_switch_text() {
+    std::vector<uint8_t> out;
+    for (int section = 0; section < 48; ++section) {
+        if ((section % 4) == 0) {
+            const char* text =
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n";
+            for (int i = 0; i < 80; ++i)
+                out.insert(out.end(), text, text + std::strlen(text));
+        } else if ((section % 4) == 1) {
+            const char* text =
+                "JSON:{\"name\":\"orot\",\"codec\":\"brotli\",\"block\":";
+            for (int i = 0; i < 80; ++i) {
+                out.insert(out.end(), text, text + std::strlen(text));
+                out.push_back(static_cast<uint8_t>('0' + (i % 10)));
+                out.insert(out.end(), {'}', '\n'});
+            }
+        } else if ((section % 4) == 2) {
+            for (int i = 0; i < 4096; ++i)
+                out.push_back(static_cast<uint8_t>((i * 37 + section * 11) & 0xff));
+        } else {
+            const char* text =
+                "literal block contexts should change when nearby bytes change; ";
+            for (int i = 0; i < 96; ++i)
+                out.insert(out.end(), text, text + std::strlen(text));
+        }
+    }
+    return out;
+}
+
 static std::vector<uint8_t> make_random(size_t n) {
     std::vector<uint8_t> out(n);
     uint32_t x = 0xBADC0DEu;
@@ -116,6 +181,75 @@ static void run_libbrotli_to_orot(const Dataset& ds, int quality, int lgwin) {
     ++passes;
 }
 
+static void run_libbrotli_to_orot_distance_params(
+    const Dataset& ds,
+    int quality,
+    int lgwin,
+    uint32_t npostfix,
+    uint32_t ndirect)
+{
+    char label[220];
+    std::snprintf(label, sizeof(label),
+                  "Brotli libbrotlienc->orot ds=%-8s q=%d lgwin=%d npostfix=%u ndirect=%u",
+                  ds.name, quality, lgwin, npostfix, ndirect);
+
+    size_t compressed_size = BrotliEncoderMaxCompressedSize(ds.data.size());
+    std::vector<uint8_t> compressed(compressed_size);
+    BrotliEncoderState* state = BrotliEncoderCreateInstance(nullptr, nullptr, nullptr);
+    if (!state) {
+        std::fprintf(stderr, "FAIL: %s (encoder allocation failed)\n", label);
+        ++failures;
+        return;
+    }
+
+    size_t available_in = ds.data.size();
+    const uint8_t* next_in = ds.data.data();
+    size_t available_out = compressed_size;
+    uint8_t* next_out = compressed.data();
+
+    BROTLI_BOOL ok =
+        BrotliEncoderSetParameter(state, BROTLI_PARAM_QUALITY, quality) &&
+        BrotliEncoderSetParameter(state, BROTLI_PARAM_LGWIN, lgwin) &&
+        BrotliEncoderSetParameter(state, BROTLI_PARAM_MODE, BROTLI_MODE_GENERIC) &&
+        BrotliEncoderSetParameter(state, BROTLI_PARAM_NPOSTFIX, npostfix) &&
+        BrotliEncoderSetParameter(state, BROTLI_PARAM_NDIRECT, ndirect) &&
+        BrotliEncoderCompressStream(
+            state, BROTLI_OPERATION_FINISH,
+            &available_in, &next_in,
+            &available_out, &next_out,
+            nullptr);
+    if (ok) {
+        ok = BrotliEncoderIsFinished(state);
+        compressed_size -= available_out;
+    }
+    BrotliEncoderDestroyInstance(state);
+
+    if (!ok) {
+        std::fprintf(stderr, "FAIL: %s (libbrotlienc failed)\n", label);
+        ++failures;
+        return;
+    }
+
+    std::vector<uint8_t> decoded(ds.data.size() + 16);
+    size_t actual = 0;
+    int dlen = orot_brotli_decompress(
+        compressed.data(), compressed_size,
+        decoded.data(), decoded.size(),
+        &actual);
+
+    if (dlen != static_cast<int>(ds.data.size()) ||
+        actual != ds.data.size() ||
+        (!ds.data.empty() && std::memcmp(ds.data.data(), decoded.data(), ds.data.size()) != 0)) {
+        std::fprintf(stderr, "FAIL: %s (orot returned=%d got=%zu expected=%zu)\n",
+                     label, dlen, actual, ds.data.size());
+        ++failures;
+        return;
+    }
+
+    std::printf("PASS: %s\n", label);
+    ++passes;
+}
+
 int main() {
     Dataset datasets[] = {
         {"empty", {}},
@@ -152,6 +286,23 @@ int main() {
     }
     run_libbrotli_to_orot(small_datasets[2], 5, OROT_BROTLI_LGWIN_DEFAULT);
     run_libbrotli_to_orot(small_datasets[3], 5, OROT_BROTLI_LGWIN_DEFAULT);
+
+    Dataset text_compat_datasets[] = {
+        {"longtext", make_long_repeated_text()},
+        {"contexts", make_context_text()},
+        {"blocks", make_block_switch_text()},
+    };
+    for (const auto& ds : text_compat_datasets) {
+        run_libbrotli_to_orot(ds, 5, OROT_BROTLI_LGWIN_DEFAULT);
+        run_libbrotli_to_orot(ds, 9, OROT_BROTLI_LGWIN_DEFAULT);
+    }
+
+    run_libbrotli_to_orot_distance_params(
+        text_compat_datasets[0], 5, OROT_BROTLI_LGWIN_DEFAULT, 1, 4);
+    run_libbrotli_to_orot_distance_params(
+        text_compat_datasets[0], 9, OROT_BROTLI_LGWIN_DEFAULT, 2, 12);
+    run_libbrotli_to_orot_distance_params(
+        text_compat_datasets[2], 9, OROT_BROTLI_LGWIN_DEFAULT, 3, 24);
 
     std::printf("\n%d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;

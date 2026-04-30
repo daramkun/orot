@@ -59,8 +59,8 @@ orot/
 │   │   ├── brotli_meta.{cpp,hpp}      # Brotli meta-block helper parsers
 │   │   ├── brotli_dictionary.{cpp,hpp} # Brotli static dictionary data/transform (Google Brotli MIT data)
 │   │   ├── brotli_dictionary_inc.hpp  # Google Brotli static dictionary byte table (MIT)
-│   │   ├── brotli_compress.{cpp,hpp}  # uncompressed meta-block encoder
-│   │   └── brotli_decompress.{cpp,hpp} # stream/meta-block parser + uncompressed decoder
+│   │   ├── brotli_compress.{cpp,hpp}  # compressed literal/copy + uncompressed fallback encoder
+│   │   └── brotli_decompress.{cpp,hpp} # stream/meta-block parser + compressed/uncompressed decoder
 │   ├── api/                # C API 진입점
 │   │   ├── deflate_api.cpp # whole-buffer compress/decompress + 체크섬
 │   │   ├── stream_api.cpp  # 스트리밍 + 병렬 API
@@ -122,12 +122,14 @@ orot/
 │   ├── compat/
 │   │   ├── test_compat.cpp       # DEFLATE 교차 라이브러리 호환성 (zlib/libdeflate, 126 케이스)
 │   │   ├── test_codec_compat.cpp # LZ4/LZMA/LZMA2/Bzip2/Zstandard 교차 라이브러리 호환성
-│   │   └── test_brotli_compat.cpp # Brotli uncompressed stream libbrotlidec 호환성
+│   │   └── test_brotli_compat.cpp # Brotli libbrotli encoder/decoder 교차 호환성
 │   └── fuzz/
 │       ├── fuzz_roundtrip.cpp   # libfuzzer compress+decompress
 │       ├── fuzz_decompress.cpp  # libfuzzer decompress only
 │       ├── fuzz_zstd_decompress.cpp # libfuzzer Zstandard frame decompress only
-│       └── fuzz_brotli.cpp      # libfuzzer Brotli whole-buffer API harness
+│       ├── fuzz_brotli.cpp      # libfuzzer Brotli whole-buffer API harness
+│       ├── run_brotli_fuzz.sh   # Brotli seed corpus 준비 + libFuzzer 실행 스크립트
+│       └── corpus/brotli/       # Brotli fuzz seed corpus
 ├── cmake/
 │   ├── DetectSIMD.cmake      # CPU 기능 프로빙
 │   ├── CompilerFlags.cmake   # LTO, 경고, 최적화
