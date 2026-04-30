@@ -334,55 +334,6 @@ static bool write_fixed_8_literal_prefix_code(BitWriter& bw) noexcept {
     return true;
 }
 
-static bool write_code_length_code_for_symbols(
-    BitWriter& bw,
-    const uint8_t* symbols,
-    int count) noexcept
-{
-    static const uint8_t kOrder[18] = {
-        1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
-    };
-
-    if (!bw.write_bits(0, 2))
-        return false;
-
-    for (int i = 0; i < 18; ++i) {
-        bool used = false;
-        for (int j = 0; j < count; ++j)
-            used = used || kOrder[i] == symbols[j];
-        if (used) {
-            if (!bw.write_bits(0b0111, 4))
-                return false;
-        } else {
-            if (!bw.write_bits(0, 2))
-                return false;
-        }
-    }
-    return true;
-}
-
-static bool write_full_command_prefix_code(BitWriter& bw) noexcept {
-    const uint8_t length_symbols[2] = {9, 10};
-    if (!write_code_length_code_for_symbols(bw, length_symbols, 2))
-        return false;
-
-    for (int symbol = 0; symbol < 704; ++symbol) {
-        if (symbol < 320) {
-            if (!bw.write_bits(0, 1))
-                return false;
-        } else {
-            if (!bw.write_bits(1, 1))
-                return false;
-        }
-    }
-    return true;
-}
-
-static bool write_full_distance_prefix_code(BitWriter& bw) noexcept {
-    const uint8_t length_symbols[1] = {6};
-    return write_code_length_code_for_symbols(bw, length_symbols, 1);
-}
-
 static bool write_compressed_literal_block(
     BitWriter& bw,
     const uint8_t* src,
@@ -466,32 +417,49 @@ static void push_distance_encoder(size_t distance, size_t last_distances[4]) noe
     last_distances[0] = distance;
 }
 
-static Match find_match_at(const uint8_t* src, size_t src_len, size_t pos) noexcept {
-    Match best;
-    if (pos < 4 || pos + 8 > src_len)
-        return best;
+static uint32_t hash4(const uint8_t* src) noexcept {
+    uint32_t v = static_cast<uint32_t>(src[0])
+        | (static_cast<uint32_t>(src[1]) << 8)
+        | (static_cast<uint32_t>(src[2]) << 16)
+        | (static_cast<uint32_t>(src[3]) << 24);
+    return (v * 0x1e35a7bdu) >> 16;
+}
 
-    size_t max_distance = std::min<size_t>(pos, 1024);
-    for (size_t distance = 1; distance <= max_distance; ++distance) {
-        if (src[pos] != src[pos - distance] ||
-            src[pos + 1] != src[pos - distance + 1] ||
-            src[pos + 2] != src[pos - distance + 2] ||
-            src[pos + 3] != src[pos - distance + 3])
-            continue;
-        size_t len = 4;
-        while (pos + len < src_len &&
-               len < 65536 &&
-               src[pos + len] == src[pos - distance + len])
-            ++len;
-        if (len > best.len) {
-            best = Match{pos, len, distance};
-            if (len >= src_len - pos)
-                return best;
-        }
-    }
-    if (best.len < 8)
+static void insert_hash_position(
+    const uint8_t* src,
+    size_t src_len,
+    size_t pos,
+    int* table) noexcept
+{
+    if (pos + 4 <= src_len)
+        table[hash4(src + pos)] = static_cast<int>(pos);
+}
+
+static Match find_match_from_table(
+    const uint8_t* src,
+    size_t src_len,
+    size_t pos,
+    const int* table) noexcept
+{
+    if (pos < 4 || pos + 8 > src_len)
         return Match{};
-    return best;
+
+    int prev = table[hash4(src + pos)];
+    if (prev < 0 || static_cast<size_t>(prev) >= pos)
+        return Match{};
+
+    size_t distance = pos - static_cast<size_t>(prev);
+    if (distance > 65535)
+        return Match{};
+
+    size_t len = 0;
+    while (pos + len < src_len &&
+           len < 65536 &&
+           src[pos + len] == src[static_cast<size_t>(prev) + len])
+        ++len;
+    if (len < 8)
+        return Match{};
+    return Match{pos, len, distance};
 }
 
 static bool add_unique_symbol(
@@ -526,9 +494,12 @@ static bool build_command_tokens(
     size_t pos = 0;
     size_t anchor = 0;
     size_t last_distances[4] = {4, 11, 15, 16};
+    int hash_table[65536];
+    std::fill(hash_table, hash_table + 65536, -1);
     while (pos < src_len) {
-        Match match = find_match_at(src, src_len, pos);
+        Match match = find_match_from_table(src, src_len, pos, hash_table);
         if (match.len == 0) {
+            insert_hash_position(src, src_len, pos, hash_table);
             ++pos;
             continue;
         }
@@ -552,15 +523,17 @@ static bool build_command_tokens(
                                               token.distance_extra_bits)) {
             return false;
         }
-        if (!add_unique_symbol(command_symbols, 704, command_count,
+        if (!add_unique_symbol(command_symbols, 4, command_count,
                                token.command_symbol) ||
-            !add_unique_symbol(distance_symbols, 64, distance_count,
+            !add_unique_symbol(distance_symbols, 4, distance_count,
                                token.distance_symbol))
             return false;
         ++out.count;
         if (token.distance_symbol != 0)
             push_distance_encoder(token.distance, last_distances);
 
+        for (size_t p = pos; p < pos + match.len; ++p)
+            insert_hash_position(src, src_len, p, hash_table);
         pos += match.len;
         anchor = pos;
     }
@@ -574,7 +547,7 @@ static bool build_command_tokens(
         token.insert_len = tail_len;
         token.copy_len = 0;
         if (!command_symbol_for_insert(tail_len, token.command_symbol) ||
-            !add_unique_symbol(command_symbols, 704, command_count,
+            !add_unique_symbol(command_symbols, 4, command_count,
                                token.command_symbol))
             return false;
         ++out.count;
@@ -623,27 +596,16 @@ static bool write_compressed_token_block(
 
     if (!write_fixed_8_literal_prefix_code(bw))
         return false;
-    if (!(command_count <= 4
-          ? write_simple_prefix_code(bw, 704, command_symbols, command_count)
-          : write_full_command_prefix_code(bw)))
+    if (!write_simple_prefix_code(bw, 704, command_symbols, command_count))
         return false;
-    if (!(distance_count <= 4
-          ? write_simple_prefix_code(bw, 64, distance_symbols, distance_count)
-          : write_full_distance_prefix_code(bw)))
+    if (!write_simple_prefix_code(bw, 64, distance_symbols, distance_count))
         return false;
 
     for (int i = 0; i < tokens.count; ++i) {
         const CommandToken& token = tokens.tokens[i];
-        if (command_count <= 4) {
-            if (!write_symbol_from_simple_code(bw, command_symbols, command_count,
-                                               token.command_symbol))
-                return false;
-        } else if (!write_prefix_bits(bw, token.command_symbol < 320
-                                          ? token.command_symbol
-                                          : 640 + (token.command_symbol - 320),
-                                      token.command_symbol < 320 ? 9 : 10)) {
+        if (!write_symbol_from_simple_code(bw, command_symbols, command_count,
+                                           token.command_symbol))
             return false;
-        }
         if (token.copy_len > 0) {
             if (!write_command_extra(bw, token.command_symbol,
                                      token.insert_len, token.copy_len))
@@ -657,13 +619,9 @@ static bool write_compressed_token_block(
                 return false;
 
         if (token.copy_len > 0) {
-            if (distance_count <= 4) {
-                if (!write_symbol_from_simple_code(bw, distance_symbols, distance_count,
-                                                   token.distance_symbol))
-                    return false;
-            } else if (!write_prefix_bits(bw, token.distance_symbol, 6)) {
+            if (!write_symbol_from_simple_code(bw, distance_symbols, distance_count,
+                                               token.distance_symbol))
                 return false;
-            }
             if (!bw.write_bits(token.distance_extra, token.distance_extra_bits))
                 return false;
         }

@@ -118,6 +118,19 @@ static std::vector<uint8_t> make_multi_copy() {
         reinterpret_cast<const uint8_t*>(text) + std::strlen(text));
 }
 
+static std::vector<uint8_t> make_varied_commands() {
+    std::vector<uint8_t> out;
+    const char* pat = "abcdefghijklmnop";
+    out.insert(out.end(), pat, pat + std::strlen(pat));
+    for (int round = 0; round < 24; ++round) {
+        int gap = 1 + (round % 11);
+        for (int i = 0; i < gap; ++i)
+            out.push_back(static_cast<uint8_t>('A' + ((round + i) % 26)));
+        out.insert(out.end(), pat, pat + std::strlen(pat));
+    }
+    return out;
+}
+
 static void run_orot_to_libbrotli(const Dataset& ds, int lgwin) {
     char label[160];
     std::snprintf(label, sizeof(label),
@@ -268,6 +281,7 @@ int main() {
         {"zeros", std::vector<uint8_t>(64 * 1024, 0)},
         {"random", make_random(64 * 1024)},
         {"multicopy", make_multi_copy()},
+        {"varcmds", make_varied_commands()},
     };
 
     int windows[] = {
