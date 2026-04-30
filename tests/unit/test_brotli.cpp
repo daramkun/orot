@@ -537,6 +537,88 @@ static void test_compressed_literal_context_mode_stream() {
     CHECK(std::memcmp(output, "AB", 2) == 0, "literal context output bytes");
 }
 
+static void test_compressed_utf8_context_mode_stream() {
+    uint8_t storage[128] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "utf8 context wbits 22");
+    CHECK(bw.write_bits(0, 1), "utf8 context non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "utf8 context mnibbles");
+    CHECK(bw.write_bits(1, 16), "utf8 context meta length two");
+    CHECK(bw.write_bits(0, 1), "utf8 context compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "utf8 context one literal block type");
+    CHECK(bw.write_bits(0, 1), "utf8 context one command block type");
+    CHECK(bw.write_bits(0, 1), "utf8 context one distance block type");
+    CHECK(bw.write_bits(0, 2), "utf8 context npostfix zero");
+    CHECK(bw.write_bits(0, 4), "utf8 context ndirect zero");
+    CHECK(bw.write_bits(2, 2), "utf8 context mode");
+    CHECK(write_varlen_uint8_plus_one(bw, 2), "utf8 context two literal trees");
+    std::vector<uint8_t> literal_map(64, 0);
+    literal_map[48] = 1;
+    CHECK(write_binary_context_map(bw, literal_map), "utf8 context map");
+    CHECK(bw.write_bits(0, 1), "utf8 context one distance tree");
+
+    CHECK(write_single_symbol_prefix(bw, 256, 'A'), "utf8 context tree 0");
+    CHECK(write_single_symbol_prefix(bw, 256, 'B'), "utf8 context tree 1");
+    CHECK(write_single_symbol_prefix(bw, 704, 16), "utf8 context command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 0), "utf8 context distance tree");
+
+    CHECK(bw.write_bits(1, 1), "utf8 context final meta-block");
+    CHECK(bw.write_bits(1, 1), "utf8 context final empty");
+    CHECK(bw.finish_zero(), "finish utf8 context stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 2, "decode utf8 context stream");
+    CHECK(actual == 2, "utf8 context actual size");
+    CHECK(std::memcmp(output, "AB", 2) == 0, "utf8 context output bytes");
+}
+
+static void test_compressed_signed_context_mode_stream() {
+    uint8_t storage[128] = {};
+    orot::brotli::BitWriter bw;
+    bw.init(storage, sizeof(storage));
+
+    CHECK(bw.write_bits(0b1011, 4), "signed context wbits 22");
+    CHECK(bw.write_bits(0, 1), "signed context non-final meta-block");
+    CHECK(bw.write_bits(0, 2), "signed context mnibbles");
+    CHECK(bw.write_bits(1, 16), "signed context meta length two");
+    CHECK(bw.write_bits(0, 1), "signed context compressed flag");
+
+    CHECK(bw.write_bits(0, 1), "signed context one literal block type");
+    CHECK(bw.write_bits(0, 1), "signed context one command block type");
+    CHECK(bw.write_bits(0, 1), "signed context one distance block type");
+    CHECK(bw.write_bits(0, 2), "signed context npostfix zero");
+    CHECK(bw.write_bits(0, 4), "signed context ndirect zero");
+    CHECK(bw.write_bits(3, 2), "signed context mode");
+    CHECK(write_varlen_uint8_plus_one(bw, 2), "signed context two literal trees");
+    std::vector<uint8_t> literal_map(64, 0);
+    literal_map[24] = 1;
+    CHECK(write_binary_context_map(bw, literal_map), "signed context map");
+    CHECK(bw.write_bits(0, 1), "signed context one distance tree");
+
+    CHECK(write_single_symbol_prefix(bw, 256, '@'), "signed context tree 0");
+    CHECK(write_single_symbol_prefix(bw, 256, 'A'), "signed context tree 1");
+    CHECK(write_single_symbol_prefix(bw, 704, 16), "signed context command tree");
+    CHECK(write_single_symbol_prefix(bw, 64, 0), "signed context distance tree");
+
+    CHECK(bw.write_bits(1, 1), "signed context final meta-block");
+    CHECK(bw.write_bits(1, 1), "signed context final empty");
+    CHECK(bw.finish_zero(), "finish signed context stream");
+
+    uint8_t output[8] = {};
+    size_t actual = 0;
+    int n = orot_brotli_decompress(storage, bw.bytes_written(storage),
+                                   output, sizeof(output), &actual);
+    CHECK(n == 2, "decode signed context stream");
+    CHECK(actual == 2, "signed context actual size");
+    CHECK(std::memcmp(output, "@A", 2) == 0, "signed context output bytes");
+}
+
 static void test_compressed_distance_context_stream() {
     uint8_t storage[128] = {};
     orot::brotli::BitWriter bw;
@@ -595,6 +677,8 @@ int main() {
     test_compressed_literal_block_switch_stream();
     test_compressed_distance_block_switch_stream();
     test_compressed_literal_context_mode_stream();
+    test_compressed_utf8_context_mode_stream();
+    test_compressed_signed_context_mode_stream();
     test_compressed_distance_context_stream();
 
     const char* text = "brotli api scaffold";

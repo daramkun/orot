@@ -19,6 +19,7 @@
 | single-tree compressed meta-block literal/copy decoder | ✅ |
 | compressed meta-block block switching (literal/command/distance) | ✅ |
 | literal/distance context map selection (LSB6/MSB6 + copy length) | ✅ |
+| UTF8/Signed literal context lookup table | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -31,9 +32,9 @@
 
 현재 단계는 Brotli 구현 2단계로, stream header와 meta-block header를
 파싱하고 uncompressed meta-block으로 구성된 Brotli stream을 압축/해제한다.
-compressed meta-block은 단일-tree literal/copy, block switching, LSB6/MSB6
-literal context, copy-length distance context를 해제할 수 있으며,
-UTF8/Signed context mode와 static dictionary 등 미지원 경로는 `-4`를 반환한다.
+compressed meta-block은 단일-tree literal/copy, block switching,
+LSB6/MSB6/UTF8/Signed literal context, copy-length distance context를 해제할 수
+있으며, static dictionary 등 미지원 경로는 `-4`를 반환한다.
 
 ### API
 
@@ -73,8 +74,7 @@ int orot_brotli_decompress(
 
 ## 다음 단계
 
-1. UTF8/Signed literal context lookup table 추가
-2. Google Brotli encoder가 만든 compressed stream 해제 호환성 추가
-3. static dictionary 지원 추가
-4. minimal compressed encoder 구현
-5. 퍼즈 테스트 추가
+1. Google Brotli encoder가 만든 compressed stream 해제 호환성 추가
+2. static dictionary 지원 추가
+3. minimal compressed encoder 구현
+4. 퍼즈 테스트 추가
