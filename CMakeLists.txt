@@ -83,6 +83,7 @@ set(OROT_ZSTD_SOURCES
 set(OROT_BROTLI_SOURCES
     src/brotli/brotli_huffman.cpp
     src/brotli/brotli_meta.cpp
+    src/brotli/brotli_dictionary.cpp
     src/brotli/brotli_compress.cpp
     src/brotli/brotli_decompress.cpp
     src/api/brotli_api.cpp
