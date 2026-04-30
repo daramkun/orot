@@ -117,8 +117,8 @@ orot/
 │   │   ├── bench_bzip2_compare.cpp   # Bzip2 비교 벤치 (libbz2) (→ bench_bzip2_compare)
 │   │   ├── bench_zstd.cpp            # Zstandard 단일 라이브러리 벤치 (→ bench_zstd)
 │   │   ├── bench_zstd_compare.cpp    # Zstandard 비교 벤치 (libzstd) (→ bench_zstd_compare)
-│   │   ├── bench_brotli.cpp          # Brotli 벤치 스캐폴드 (→ bench_brotli)
-│   │   └── bench_brotli_compare.cpp  # Brotli 비교 벤치 스캐폴드 (→ bench_brotli_compare)
+│   │   ├── bench_brotli.cpp          # Brotli 압축/해제 벤치 (→ bench_brotli)
+│   │   └── bench_brotli_compare.cpp  # Brotli 비교 벤치 (libbrotli) (→ bench_brotli_compare)
 │   ├── compat/
 │   │   ├── test_compat.cpp       # DEFLATE 교차 라이브러리 호환성 (zlib/libdeflate, 126 케이스)
 │   │   ├── test_codec_compat.cpp # LZ4/LZMA/LZMA2/Bzip2/Zstandard 교차 라이브러리 호환성

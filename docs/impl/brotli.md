@@ -36,7 +36,11 @@
 | 일반 literal alphabet용 literal-only compressed encoder | ✅ |
 | 단일 back-reference/copy command compressed encoder | ✅ |
 | greedy 다중 back-reference/copy command encoder | ✅ |
+| command/distance full-alphabet prefix code fallback | ✅ |
+| encoder last-distance short code 0 활용 | ✅ |
 | Brotli fuzz seed corpus 및 실행 스크립트 | ✅ |
+| Brotli fuzz CI smoke workflow | ✅ |
+| Brotli 자체/비교 벤치마크 | ✅ |
 | 실제 Brotli decoder | ⬜ |
 | 실제 Brotli encoder | ⬜ |
 | compressed meta-block decoder | ⬜ |
@@ -64,12 +68,14 @@ meta-block으로 표현 가능한 입력은 compressed meta-block을 우선 출�
 Literal alphabet이 4개 이하인 경우 simple prefix code를 쓰고, 일반 literal
 alphabet은 256개 literal 전체를 8-bit complex prefix code로 출력한다. 반복이
 발견되면 greedy match 탐색으로 여러 insert/copy command와 distance code를
-출력한다. 현재 command/distance prefix code는 simple prefix code 경로를 사용하므로
-각 alphabet이 4개 심볼을 넘으면 literal-only compressed block으로 fallback한다.
-match가 없으면 literal-only compressed block을 출력한다. Complex prefix code의
-repeated code-length는 Brotli reference와 같이 읽는 즉시 Huffman space와 symbol
-position에 반영한다. Insert/copy-length command table은 Google Brotli decoder의
-`kCmdLut` 생성 규칙과 같은 base/extra 값을 사용한다.
+출력한다. Command/distance alphabet이 4개 이하이면 simple prefix code를 쓰고,
+그보다 크면 complete full-alphabet complex prefix code로 fallback해 compressed
+block 출력을 유지한다. Encoder는 last-distance ring buffer의 선두 distance와
+일치하는 match에 short distance code 0을 사용한다. match가 없으면 literal-only
+compressed block을 출력한다. Complex prefix code의 repeated code-length는 Brotli
+reference와 같이 읽는 즉시 Huffman space와 symbol position에 반영한다.
+Insert/copy-length command table은 Google Brotli decoder의 `kCmdLut` 생성 규칙과
+같은 base/extra 값을 사용한다.
 
 ### API
 
@@ -119,6 +125,6 @@ BUILD_DIR=build-fuzz MAX_TOTAL_TIME=60 sh tests/fuzz/run_brotli_fuzz.sh
 
 ## 다음 단계
 
-1. encoder용 동적 literal/command/distance prefix code 생성
-2. last-distance short code 활용 및 match scoring 개선
-3. Brotli fuzz CI 환경 고정
+1. encoder용 빈도 기반 동적 literal/command/distance prefix code 생성
+2. last-distance short code 1..15 및 match scoring 개선
+3. decoder real-world corpus 확대와 dictionary-heavy stream 보강

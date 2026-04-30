@@ -1,0 +1,6 @@
+GET /assets/app.css HTTP/2
+accept-encoding: br, gzip, deflate
+cache-control: no-cache
+content-type: text/css
+
+.panel{display:grid;gap:8px}.panel .item{display:grid;gap:8px}

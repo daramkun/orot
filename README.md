@@ -16,7 +16,7 @@ C++20 무손실 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC
   - Zstandard frame raw/RLE 압축, raw/RLE/compressed block 해제
   - Zstandard raw content dictionary API 및 buffered streaming API
   - 구현 상세: [Zstandard 구현 문서](docs/impl/zstd.md)
-- **Brotli 지원 준비:** uncompressed meta-block stream 압축/해제, compressed block 구현 예정
+- **Brotli 지원:** compressed/uncompressed meta-block 압축/해제, libbrotli 호환 테스트
   - 구현 상세: [Brotli 구현 문서](docs/impl/brotli.md)
 - SIMD 가속: SSE2 / SSE4.2 / AVX2 (x86), NEON / CRC32 (ARM)
 - 멀티스레드 압축 (pigz 스타일)
@@ -62,7 +62,7 @@ cmake --install build --prefix /usr/local
 | `OROT_AS_PARALLEL` | ON | 병렬 압축 (pigz 스타일) |
 | `OROT_TESTS` | OFF | 유닛 테스트 빌드 |
 | `OROT_BENCHMARK` | OFF | 단일 라이브러리 벤치마크 |
-| `OROT_BENCHMARK_COMPARE` | OFF | zlib/libdeflate/liblz4/liblzma/libbz2/libzstd 비교 벤치마크 + Brotli placeholder |
+| `OROT_BENCHMARK_COMPARE` | OFF | zlib/libdeflate/liblz4/liblzma/libbz2/libzstd/libbrotli 비교 벤치마크 |
 | `OROT_TESTS` | OFF | 교차 라이브러리 호환성 테스트 |
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
 | `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |

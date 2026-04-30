@@ -1,0 +1,28 @@
+name: Brotli Fuzz
+
+on:
+  push:
+    paths:
+      - "src/brotli/**"
+      - "include/orot/brotli.h"
+      - "tests/fuzz/**"
+      - "tests/CMakeLists.txt"
+      - ".github/workflows/brotli-fuzz.yml"
+  pull_request:
+    paths:
+      - "src/brotli/**"
+      - "include/orot/brotli.h"
+      - "tests/fuzz/**"
+      - "tests/CMakeLists.txt"
+      - ".github/workflows/brotli-fuzz.yml"
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
+      - name: Brotli fuzz smoke
+        run: BUILD_DIR=build-fuzz MAX_TOTAL_TIME=30 JOBS=2 sh tests/fuzz/run_brotli_fuzz.sh

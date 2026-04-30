@@ -229,10 +229,36 @@ if(OROT_BENCHMARK_COMPARE)
   target_compile_options(bench_zstd_compare PRIVATE -O3)
   message(STATUS "Zstandard: comparison benchmark enabled (orot + libzstd)")
 
-  # Brotli comparison placeholder — real external-lib comparison is added with
-  # the encoder/decoder implementation.
-  add_orot_benchmark(bench_brotli_compare bench/bench_brotli_compare.cpp)
-  message(STATUS "Brotli: comparison benchmark placeholder enabled")
+  find_library(LIBBROTLI_DEC_LIB brotlidec
+        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+        PATH_SUFFIXES lib)
+  find_library(LIBBROTLI_ENC_LIB brotlienc
+        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+        PATH_SUFFIXES lib)
+  find_library(LIBBROTLI_COMMON_LIB brotlicommon
+        HINTS /opt/homebrew/lib /usr/local/lib ${CMAKE_INSTALL_PREFIX}/lib
+        PATH_SUFFIXES lib)
+  find_path(LIBBROTLI_INCLUDE_DIR brotli/decode.h
+        HINTS /opt/homebrew/include /usr/local/include ${CMAKE_INSTALL_PREFIX}/include
+        PATH_SUFFIXES include)
+  if(NOT LIBBROTLI_DEC_LIB OR NOT LIBBROTLI_ENC_LIB OR
+     NOT LIBBROTLI_COMMON_LIB OR NOT LIBBROTLI_INCLUDE_DIR)
+    message(FATAL_ERROR "libbrotli not found. Install with: brew install brotli")
+  endif()
+
+  add_executable(bench_brotli_compare bench/bench_brotli_compare.cpp)
+  target_link_libraries(bench_brotli_compare PRIVATE
+      orot
+      ${LIBBROTLI_DEC_LIB}
+      ${LIBBROTLI_ENC_LIB}
+      ${LIBBROTLI_COMMON_LIB}
+  )
+  target_include_directories(bench_brotli_compare PRIVATE
+      ${CMAKE_SOURCE_DIR}/include
+      ${LIBBROTLI_INCLUDE_DIR}
+  )
+  target_compile_options(bench_brotli_compare PRIVATE -O3)
+  message(STATUS "Brotli: comparison benchmark enabled (orot + libbrotli)")
 endif()
 
 # ── Cross-library compatibility tests (auto when OROT_TESTS=ON + zlib+libdeflate present) ──
