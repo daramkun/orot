@@ -138,11 +138,13 @@ int main() {
         {"abc", {'a', 'b', 'c'}},
         {"phrase", {'h', 'e', 'l', 'l', 'o', ' ', 'h', 'e',
                     'l', 'l', 'o', ' ', 'h', 'e', 'l', 'l', 'o'}},
+        {"repeata", std::vector<uint8_t>(32, 'a')},
     };
     for (const auto& ds : small_datasets) {
         run_libbrotli_to_orot(ds, 0, OROT_BROTLI_LGWIN_DEFAULT);
         run_libbrotli_to_orot(ds, 1, OROT_BROTLI_LGWIN_DEFAULT);
     }
+    run_libbrotli_to_orot(small_datasets[2], 5, OROT_BROTLI_LGWIN_DEFAULT);
 
     std::printf("\n%d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;
