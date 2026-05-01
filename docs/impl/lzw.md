@@ -39,10 +39,24 @@ orot의 LZW 구현은 가변 폭 코드(variable-width code) 방식의 Lempel-Zi
 - 첫 1바이트: `max_bits` 값 (9~16). 압축해제 시 별도 파라미터 불필요
 - 이후: LSB 우선 가변 폭 코드 비트스트림
 
+`max_bits=12` 기본 압축 경로는 성능을 위해 OROT 전용 fast subformat을 사용할 수 있다.
+디코더는 기존 `9~16` 헤더의 가변 폭 스트림과 아래 fast subformat을 모두 처리한다.
+
+| 헤더 | 포맷 | 페이로드 |
+|------|------|----------|
+| `0x8c` | fixed-12 LZW | `[LSB-first 12-bit codes ...]` |
+| `0x4c` | stored raw | `[u32le: decoded_len] [raw bytes ...]` |
+| `0x2c` | periodic | `[u32le: decoded_len] [u16le: period] [period bytes ...]` |
+
+- `fixed-12`는 기본 설정에서 code-width 갱신 분기를 제거한 12bit 고정 코드 스트림이다.
+- `stored raw`는 고엔트로피 입력에서 LZW 확장과 느린 딕셔너리 경로를 피한다.
+- `periodic`은 단순 반복/주기 입력을 주기 descriptor로 저장해 압축해제 시 반복 복사만 수행한다.
+
 ### 메모리 사용
 
 - 압축: 해시 테이블 기반 딕셔너리 `(1 << max_bits)` 슬롯. 반복 호출의 heap
-  allocation을 피하기 위해 thread-local scratch table을 재사용한다.
+  allocation을 피하기 위해 thread-local scratch table을 재사용한다. 기본 `max_bits=12`
+  경로는 별도 fixed-12 해시 테이블을 사용한다.
 - 압축해제: 코드→문자열 테이블 `(1 << max_bits)` 엔트리. 각 엔트리는 prefix,
   suffix, 문자열 길이와 첫 바이트를 저장해 KwKwK/새 엔트리 생성 시 prefix chain
   재탐색을 줄인다. 테이블은 thread-local scratch로 재사용한다.
