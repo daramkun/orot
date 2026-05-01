@@ -252,6 +252,9 @@ int lzw_decompress(
             if (new_pos < 0) return new_pos;
             dst[new_pos++] = fc;
             out_pos = new_pos;
+        } else if (code < 256) {
+            if (out_pos >= dst_cap) return -2;
+            dst[out_pos++] = static_cast<uint8_t>(code);
         } else {
             int new_pos = emit_code(table, code, dst, dst_cap, out_pos);
             if (new_pos < 0) return new_pos;
