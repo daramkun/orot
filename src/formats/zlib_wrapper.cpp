@@ -60,6 +60,7 @@ static bool try_stored_zlib_decompress(
     const uint8_t* const end = src + src_len - 4;
     uint8_t* op = dst;
     uint8_t* const op_end = dst + dst_capacity;
+    uint32_t adler = 1;
 
     for (;;) {
         if (ip + 5 > end) return false;
@@ -76,6 +77,7 @@ static bool try_stored_zlib_decompress(
         if (ip + len > end) return false;
         if (op + len > op_end) return false;
 
+        adler = simd_adler32_fn()(adler, ip, len);
         std::memcpy(op, ip, len);
         ip += len;
         op += len;
@@ -93,8 +95,7 @@ static bool try_stored_zlib_decompress(
         | (static_cast<uint32_t>(trailer[2]) <<  8)
         |  static_cast<uint32_t>(trailer[3]);
     const size_t decoded_size = static_cast<size_t>(op - dst);
-    const uint32_t actual = simd_adler32_fn()(1, dst, decoded_size);
-    if (actual != expected) return false;
+    if (adler != expected) return false;
 
     *actual_out_size = decoded_size;
     return true;

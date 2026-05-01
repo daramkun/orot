@@ -135,8 +135,8 @@ static CompressConfig config_for_level(int level) noexcept {
 
     CompressConfig cfg;
     cfg.level = level;
-    cfg.prefer_rle = false;
-    cfg.verify_rle = false;
+    cfg.prefer_rle = true;
+    cfg.verify_rle = true;
     return cfg;
 }
 
@@ -196,8 +196,22 @@ static void write_frame_header(uint8_t*& p, int src_len, uint32_t dict_id = 0) n
 static bool block_is_rle(const uint8_t* src, int len) noexcept {
     if (len <= 1) return false;
     const uint8_t value = src[0];
-    for (int i = 1; i < len; ++i) {
-        if (src[i] != value) return false;
+
+    uint64_t repeated = value;
+    repeated |= repeated << 8;
+    repeated |= repeated << 16;
+    repeated |= repeated << 32;
+
+    const uint8_t* p = src + 1;
+    const uint8_t* end = src + len;
+    while (p + 8 <= end) {
+        uint64_t lane;
+        std::memcpy(&lane, p, sizeof(lane));
+        if (lane != repeated) return false;
+        p += 8;
+    }
+    while (p < end) {
+        if (*p++ != value) return false;
     }
     return true;
 }
