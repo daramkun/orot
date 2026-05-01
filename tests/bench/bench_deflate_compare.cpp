@@ -191,6 +191,15 @@ int main(int argc, char** argv) {
                 std::printf("  speedup (vs zlib)  comp=%.2fx  decomp=%.2fx\n",
                     r_orot.comp_mbs / r_zlib.comp_mbs,
                     r_orot.decomp_mbs / r_zlib.decomp_mbs);
+            if (r_orot.ok && r_zlib.ok && r_ldf.ok) {
+                double best_comp = (r_zlib.comp_mbs > r_ldf.comp_mbs)
+                    ? r_zlib.comp_mbs : r_ldf.comp_mbs;
+                double best_decomp = (r_zlib.decomp_mbs > r_ldf.decomp_mbs)
+                    ? r_zlib.decomp_mbs : r_ldf.decomp_mbs;
+                std::printf("  speedup (vs best)  comp=%.2fx  decomp=%.2fx\n",
+                    r_orot.comp_mbs / best_comp,
+                    r_orot.decomp_mbs / best_decomp);
+            }
 
             std::putchar('\n');
         }

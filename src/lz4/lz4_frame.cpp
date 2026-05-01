@@ -192,9 +192,6 @@ int lz4f_decompress(
     bool has_content_cs = (flg & LZ4F_FLAG_CONTENT_CS) != 0;
     bool block_independent = (flg & 0x20) != 0;
 
-    XXH32State content_xxh;
-    content_xxh.reset(0);
-
     uint8_t* op     = dst;
     uint8_t* op_end = dst + dst_cap;
 
@@ -215,7 +212,6 @@ int lz4f_decompress(
         if (uncompressed) {
             if (op + block_data_len > op_end) return -2;
             __builtin_memcpy(op, ip, static_cast<size_t>(block_data_len));
-            content_xxh.update(op, static_cast<size_t>(block_data_len));
             op += block_data_len;
         } else {
             int avail = static_cast<int>(op_end - op);
@@ -226,7 +222,6 @@ int lz4f_decompress(
             if (decompressed < 0) {
                 return (decompressed == -2) ? -2 : -1;
             }
-            content_xxh.update(op, static_cast<size_t>(decompressed));
             op += decompressed;
         }
         ip += block_data_len;
@@ -236,7 +231,7 @@ int lz4f_decompress(
     if (has_content_cs) {
         if (ip + 4 > ip_end) return -1;
         uint32_t stored_cs   = read_le32(ip);
-        uint32_t computed_cs = content_xxh.digest();
+        uint32_t computed_cs = xxh32(dst, static_cast<size_t>(op - dst));
         if (stored_cs != computed_cs) return -3;
     }
 

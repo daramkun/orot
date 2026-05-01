@@ -95,11 +95,13 @@ int lzw_compress(
     const int      hash_size = 1 << hash_bits;
     const uint32_t hash_mask = static_cast<uint32_t>(hash_size - 1);
 
-    auto hash_key  = std::make_unique<uint32_t[]>(static_cast<size_t>(hash_size));
-    auto hash_code = std::make_unique<uint32_t[]>(static_cast<size_t>(hash_size));
+    static thread_local uint32_t hash_key_storage[1 << (LZW_MAX_BITS + 1)];
+    static thread_local uint32_t hash_code_storage[1 << (LZW_MAX_BITS + 1)];
+    uint32_t* hash_key = hash_key_storage;
+    uint32_t* hash_code = hash_code_storage;
 
     auto clear_hash = [&]() noexcept {
-        std::memset(hash_key.get(), 0xFF,
+        std::memset(hash_key, 0xFF,
                     static_cast<size_t>(hash_size) * sizeof(uint32_t));
     };
 
@@ -164,6 +166,7 @@ int lzw_compress(
 struct DecEntry {
     uint16_t prefix;  /* 0xFFFF = root (single-byte literal) */
     uint8_t  suffix;
+    uint8_t  first;
     uint16_t len;     /* total decoded string length */
 };
 
@@ -186,13 +189,6 @@ static int emit_code(
     return out_pos + str_len;
 }
 
-/* Walk prefix chain and return the root (first) character. */
-static uint8_t first_char(const DecEntry* table, int code) noexcept {
-    while (code >= 256)
-        code = static_cast<int>(table[code].prefix);
-    return static_cast<uint8_t>(code);
-}
-
 int lzw_decompress(
     const uint8_t* src, int src_len,
     uint8_t* dst, int dst_cap) noexcept
@@ -204,11 +200,13 @@ int lzw_decompress(
 
     const int max_codes = 1 << max_bits;
 
-    auto table = std::make_unique<DecEntry[]>(static_cast<size_t>(max_codes));
+    static thread_local DecEntry table_storage[1 << LZW_MAX_BITS];
+    DecEntry* table = table_storage;
 
     for (int i = 0; i < 256; ++i) {
         table[i].prefix = 0xFFFFu;
         table[i].suffix = static_cast<uint8_t>(i);
+        table[i].first  = static_cast<uint8_t>(i);
         table[i].len    = 1;
     }
 
@@ -249,13 +247,13 @@ int lzw_decompress(
             const int prev_len = static_cast<int>(table[prev_code].len);
             if (out_pos + prev_len + 1 > dst_cap) return -2;
 
-            const uint8_t fc = first_char(table.get(), prev_code);
-            int new_pos = emit_code(table.get(), prev_code, dst, dst_cap, out_pos);
+            const uint8_t fc = table[prev_code].first;
+            int new_pos = emit_code(table, prev_code, dst, dst_cap, out_pos);
             if (new_pos < 0) return new_pos;
             dst[new_pos++] = fc;
             out_pos = new_pos;
         } else {
-            int new_pos = emit_code(table.get(), code, dst, dst_cap, out_pos);
+            int new_pos = emit_code(table, code, dst, dst_cap, out_pos);
             if (new_pos < 0) return new_pos;
             out_pos = new_pos;
         }
@@ -263,11 +261,12 @@ int lzw_decompress(
         /* Add new table entry. */
         if (prev_code >= 0 && next_code < max_codes) {
             const uint8_t fc = is_kwkwk
-                ? first_char(table.get(), prev_code)
-                : first_char(table.get(), code);
+                ? table[prev_code].first
+                : table[code].first;
 
             table[next_code].prefix = static_cast<uint16_t>(prev_code);
             table[next_code].suffix = fc;
+            table[next_code].first  = table[prev_code].first;
             table[next_code].len    = static_cast<uint16_t>(table[prev_code].len + 1);
             ++next_code;
         }

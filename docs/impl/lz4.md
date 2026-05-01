@@ -163,7 +163,10 @@ cmake --build build --target test_lz4 test_lz4_comprehensive bench_lz4
 
 ### Frame 형식
 
-Frame은 header/footer/checksum 오버헤드로 block 대비 약 2-5배 느림.
+Frame은 header/footer/checksum 오버헤드로 block 대비 느리다. Whole-buffer
+해제 경로는 출력 버퍼가 연속이라는 점을 이용해 content checksum을 블록별 streaming
+update 대신 마지막에 one-shot XXH32로 검증한다. 비교 벤치마크는 OROT frame과
+동일하게 liblz4 frame도 content checksum을 켠 상태로 측정한다.
 
 | 데이터 | 레벨 | 압축 MB/s | 해제 MB/s |
 |--------|------|-----------|-----------|

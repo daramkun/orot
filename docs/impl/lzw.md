@@ -41,8 +41,11 @@ orot의 LZW 구현은 가변 폭 코드(variable-width code) 방식의 Lempel-Zi
 
 ### 메모리 사용
 
-- 압축: 해시 테이블 기반 딕셔너리 `(1 << max_bits)` 슬롯
-- 압축해제: 코드→문자열 테이블 `(1 << max_bits) * 6` 바이트
+- 압축: 해시 테이블 기반 딕셔너리 `(1 << max_bits)` 슬롯. 반복 호출의 heap
+  allocation을 피하기 위해 thread-local scratch table을 재사용한다.
+- 압축해제: 코드→문자열 테이블 `(1 << max_bits)` 엔트리. 각 엔트리는 prefix,
+  suffix, 문자열 길이와 첫 바이트를 저장해 KwKwK/새 엔트리 생성 시 prefix chain
+  재탐색을 줄인다. 테이블은 thread-local scratch로 재사용한다.
 
 ---
 

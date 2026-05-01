@@ -71,6 +71,7 @@ static int liblz4_block_bound(int sl) { return LZ4_compressBound(sl); }
 static int liblz4_frame_comp(const uint8_t* s, int sl, uint8_t* d, int dc, int lv) {
     LZ4F_preferences_t prefs{};
     prefs.compressionLevel = lv;
+    prefs.frameInfo.contentChecksumFlag = LZ4F_contentChecksumEnabled;
     size_t written = LZ4F_compressFrame(d, static_cast<size_t>(dc),
                                         s, static_cast<size_t>(sl), &prefs);
     return LZ4F_isError(written) ? -1 : static_cast<int>(written);
@@ -92,7 +93,9 @@ static int liblz4_frame_decomp(const uint8_t* s, int sl, uint8_t* d, int dc) {
     return static_cast<int>(static_cast<size_t>(dc) - dr);
 }
 static int liblz4_frame_bound(int sl) {
-    return static_cast<int>(LZ4F_compressFrameBound(static_cast<size_t>(sl), nullptr));
+    LZ4F_preferences_t prefs{};
+    prefs.frameInfo.contentChecksumFlag = LZ4F_contentChecksumEnabled;
+    return static_cast<int>(LZ4F_compressFrameBound(static_cast<size_t>(sl), &prefs));
 }
 
 /* ── Runner ──────────────────────────────────────────────────────────────── */
