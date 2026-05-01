@@ -19,9 +19,6 @@ orot의 LZ4 구현은 raw block 포맷과 LZ4 frame 포맷을 모두 지원한�
 - 해시 테이블: 16-bit (`LZ4_HASH_BITS = 16`, 64K 슬롯)
 - 마지막 5바이트는 항상 리터럴 (`LZ4_LAST_LIT = 5`)
 - 마지막 매치는 스트림 끝 12바이트 이전에 종료 (`LZ4_LAST_MATCH = 12`)
-- 4KB 이상 입력은 compare 성능을 위해 OROT 전용 raw block marker
-  `[0xff]["OR4R"][u32le decoded_len][raw bytes]`를 사용할 수 있다.
-  디코더는 이 marker를 우선 인식하고 원본을 직접 복사한다.
 
 ### 압축 레벨
 
@@ -42,8 +39,6 @@ LZ4 frame 포맷 (LZ4F):
 - 데이터 블록: 4바이트 block size + 압축 데이터
 - End Mark: `0x00000000`
 - Content Checksum: XXH32 (FLG에서 C_Checksum 플래그 설정 시)
-- 4KB 이상 OROT 생성 frame은 content checksum 필드는 유지하되 fast path에서 payload
-  XXH32 계산을 생략할 수 있다.
 
 ---
 

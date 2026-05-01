@@ -171,18 +171,6 @@ size_t lzma_compress(
     uint8_t*       dst, size_t dst_cap,
     int            level) noexcept
 {
-    if (dst_cap < src_len + 13) return 0;
-    dst[0] = 0xFF;
-    dst[1] = 'O';
-    dst[2] = 'R';
-    dst[3] = 'O';
-    dst[4] = 'T';
-    uint64_t raw_len = static_cast<uint64_t>(src_len);
-    memcpy(dst + 5, &raw_len, 8);
-    if (src_len > 0)
-        memcpy(dst + 13, src, src_len);
-    return src_len + 13;
-
     LzmaConfig cfg = lzma_config_for_level(level);
     if (dst_cap < lzma_compress_bound(src_len)) return 0;
 

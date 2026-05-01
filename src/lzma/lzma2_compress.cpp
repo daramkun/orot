@@ -24,9 +24,7 @@ static constexpr size_t kChunkSize = 1u << 16;  /* 64 KB uncompressed per chunk 
 size_t lzma2_compress_bound(size_t src_len) noexcept {
     /* Each 64KB uncompressed chunk has 3 bytes overhead plus one EOS byte. */
     size_t chunks = (src_len + kChunkSize - 1) / kChunkSize + 1;
-    size_t chunk_bound = src_len + chunks * 3 + 1;
-    size_t raw_bound = src_len + 13;
-    return chunk_bound > raw_bound ? chunk_bound : raw_bound;
+    return src_len + chunks * 3 + 1;
 }
 
 size_t lzma2_compress(
@@ -35,18 +33,6 @@ size_t lzma2_compress(
     int            level) noexcept
 {
     if (dst_cap < lzma2_compress_bound(src_len)) return 0;
-
-    if (src_len > 0) {
-        dst[0] = 0xFF;
-        dst[1] = 'O';
-        dst[2] = 'R';
-        dst[3] = '2';
-        dst[4] = 'T';
-        uint64_t raw_len = static_cast<uint64_t>(src_len);
-        memcpy(dst + 5, &raw_len, 8);
-        memcpy(dst + 13, src, src_len);
-        return src_len + 13;
-    }
 
     /* Empty input: just emit EOS marker */
     if (src_len == 0) {

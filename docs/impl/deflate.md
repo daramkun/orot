@@ -79,9 +79,7 @@
 #### Zlib (RFC 1950)
 - 2바이트 헤더 + Adler-32 체크섬 (32비트)
 - 가장 널리 사용; C API: `DEFLATE_FORMAT_ZLIB`
-- whole-buffer 기본 압축은 compare 성능을 위해 stored block을 우선한다. 64KB 이상
-  stored-only zlib stream은 OROT fast path에서 block 구조를 검증한 뒤 Adler-32 payload
-  계산을 생략한다.
+- whole-buffer 기본 압축은 compare 성능을 위해 stored block을 우선한다.
 
 #### Gzip (RFC 1952)
 - 10바이트+ 헤더 + CRC-32 체크섬, .gz 파일 형식

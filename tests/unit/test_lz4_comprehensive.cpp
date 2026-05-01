@@ -178,7 +178,7 @@ static void test_block_compression_ratio(TestResult& result) {
         }
         
         if (ds.should_compress) {
-            TEST_ASSERT(best_ratio <= 101.0, "compressible data handled by compressed or raw fast path", result);
+            TEST_ASSERT(best_ratio < 95.0, "compression achieved on compressible data", result);
         } else {
             TEST_ASSERT(best_ratio >= 99.0 && best_ratio <= 102.0, 
                        "random data has minimal compression or expansion", result);
@@ -288,7 +288,7 @@ static void test_edge_cases(TestResult& result) {
         std::vector<uint8_t> comp(bound);
 
         int clen = orot_lz4_compress(rep.data(), 100000, comp.data(), bound, 1);
-        TEST_ASSERT(clen > 0 && clen <= bound, "highly repetitive handled by compressed or raw fast path", result);
+        TEST_ASSERT(clen > 0 && clen < 1000, "highly repetitive compresses well", result);
         double ratio = (100.0 * clen / 100000);
         std::printf("  100KB all 0xAB: %.1f%% (excellent compression)\n", ratio);
     }

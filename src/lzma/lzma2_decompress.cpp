@@ -14,17 +14,6 @@ size_t lzma2_decompress(
     const uint8_t* src, size_t src_len,
     uint8_t*       dst, size_t dst_cap) noexcept
 {
-    if (src_len >= 13 && src[0] == 0xFF && src[1] == 'O' &&
-        src[2] == 'R' && src[3] == '2' && src[4] == 'T') {
-        uint64_t usz;
-        memcpy(&usz, src + 5, 8);
-        if (usz > dst_cap) return 0;
-        if (src_len - 13 != usz) return 0;
-        if (usz > 0)
-            memcpy(dst, src + 13, static_cast<size_t>(usz));
-        return static_cast<size_t>(usz);
-    }
-
     /* Allocate prob tables (reused across chunks, reset when required) */
     std::unique_ptr<LzmaProbTables> pt(new (std::nothrow) LzmaProbTables);
     if (!pt) return 0;

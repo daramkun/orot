@@ -47,7 +47,6 @@ Huffman → RLE2 → MTF-1 → BWT-1 → RLE1 → 원본
 ### Magic Numbers
 
 - Stream header: `BZh` + level('1'~'9')
-- OROT raw fast stream: `BZh0` + `u64le decoded_len` + raw bytes
 - Block start: `0x314159265359` (48-bit)
 - Stream end: `0x177245385090` (48-bit)
 

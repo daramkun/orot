@@ -40,12 +40,8 @@ size_t zlib_compress(
     const size_t raw_n = raw_compress(src, src_len, dst + 2, dst_capacity - 6, level);
     if (raw_n == 0) return 0;
 
-    /* Adler-32 trailer (big-endian). Large stored streams use the matching
-     * fast decompress path, which validates stored block structure and skips
-     * the expensive payload checksum. */
-    const uint32_t adler = (src_len >= 65536)
-        ? 0
-        : simd_adler32_fn()(1, src, src_len);
+    /* Adler-32 trailer (big-endian) */
+    const uint32_t adler = simd_adler32_fn()(1, src, src_len);
     const size_t   end   = 2 + raw_n;
     dst[end + 0] = static_cast<uint8_t>(adler >> 24);
     dst[end + 1] = static_cast<uint8_t>(adler >> 16);
@@ -90,19 +86,17 @@ static bool try_stored_zlib_decompress(
 
     if (ip != end) return false;
 
-    *actual_out_size = static_cast<size_t>(op - dst);
-    if (*actual_out_size >= 65536)
-        return true;
-
     const uint8_t* trailer = src + src_len - 4;
     const uint32_t expected =
           (static_cast<uint32_t>(trailer[0]) << 24)
         | (static_cast<uint32_t>(trailer[1]) << 16)
         | (static_cast<uint32_t>(trailer[2]) <<  8)
         |  static_cast<uint32_t>(trailer[3]);
-    const uint32_t actual = simd_adler32_fn()(1, dst, *actual_out_size);
+    const size_t decoded_size = static_cast<size_t>(op - dst);
+    const uint32_t actual = simd_adler32_fn()(1, dst, decoded_size);
     if (actual != expected) return false;
 
+    *actual_out_size = decoded_size;
     return true;
 }
 

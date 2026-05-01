@@ -5,12 +5,6 @@
 
 namespace orot { namespace lz4 {
 
-static constexpr uint8_t LZ4_RAW_MARKER = 0xFF;
-static constexpr uint8_t LZ4_RAW_MAGIC0 = 'O';
-static constexpr uint8_t LZ4_RAW_MAGIC1 = 'R';
-static constexpr uint8_t LZ4_RAW_MAGIC2 = '4';
-static constexpr uint8_t LZ4_RAW_MAGIC3 = 'R';
-
 /* ── Level config ────────────────────────────────────────────────────────── */
 
 LZ4Config lz4_config_for_level(int level) noexcept {
@@ -131,22 +125,6 @@ int lz4_block_compress(
     uint8_t* dst, int dst_cap,
     LZ4State& state, const LZ4Config& cfg) noexcept
 {
-    if (src_len >= 4096) {
-        if (dst_cap < src_len + 9) return -1;
-        dst[0] = LZ4_RAW_MARKER;
-        dst[1] = LZ4_RAW_MAGIC0;
-        dst[2] = LZ4_RAW_MAGIC1;
-        dst[3] = LZ4_RAW_MAGIC2;
-        dst[4] = LZ4_RAW_MAGIC3;
-        uint32_t n = static_cast<uint32_t>(src_len);
-        dst[5] = static_cast<uint8_t>(n);
-        dst[6] = static_cast<uint8_t>(n >> 8);
-        dst[7] = static_cast<uint8_t>(n >> 16);
-        dst[8] = static_cast<uint8_t>(n >> 24);
-        __builtin_memcpy(dst + 9, src, static_cast<size_t>(src_len));
-        return src_len + 9;
-    }
-
     if (src_len <= 0) {
         /* Empty input: single token byte with no literals, no match */
         if (dst_cap < 1) return -1;
@@ -324,20 +302,6 @@ int lz4_block_decompress_with_prefix(
     uint8_t* prefix_base,
     uint8_t* dst, int dst_cap) noexcept
 {
-    if (src_len >= 9 && src[0] == LZ4_RAW_MARKER &&
-        src[1] == LZ4_RAW_MAGIC0 && src[2] == LZ4_RAW_MAGIC1 &&
-        src[3] == LZ4_RAW_MAGIC2 && src[4] == LZ4_RAW_MAGIC3) {
-        uint32_t n = static_cast<uint32_t>(src[5])
-            | (static_cast<uint32_t>(src[6]) << 8)
-            | (static_cast<uint32_t>(src[7]) << 16)
-            | (static_cast<uint32_t>(src[8]) << 24);
-        if (n > static_cast<uint32_t>(dst_cap)) return -2;
-        if (static_cast<uint32_t>(src_len - 9) != n) return -1;
-        __builtin_memcpy(dst, src + 9, static_cast<size_t>(n));
-        (void)prefix_base;
-        return static_cast<int>(n);
-    }
-
     const uint8_t* ip     = src;
     const uint8_t* ip_end = src + src_len;
     uint8_t*       op     = dst;

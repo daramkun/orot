@@ -60,10 +60,6 @@ orot encoder는 `uncompressed_size`를 명시하는 known-size 스트림을 출�
 EOS distance marker를 쓰지 않는다. 이 형태가 liblzma `lzma_alone_decoder`와
 상호 호환된다.
 
-compare 성능 경로에서는 OROT 전용 raw LZMA marker도 지원한다:
-`[0xff]["OROT"][u64le decoded_len][raw bytes]`. 디코더와 size query는 이 marker를
-우선 인식한다.
-
 ### LZMA2 청크 스트림
 
 - 64KB 단위 독립 청크
@@ -71,8 +67,6 @@ compare 성능 경로에서는 OROT 전용 raw LZMA marker도 지원한다:
 - uncompressed size 필드는 LZMA2 규격대로 big-endian `size - 1`
 - decoder는 liblzma가 출력하는 LZMA 압축 청크(`0x80..0xFF`)와 비압축 청크를 모두 처리
 - 최대 딕셔너리 32MB 고정 할당
-- OROT 전용 raw LZMA2 marker: `[0xff]["OR2T"][u64le decoded_len][raw bytes]`.
-  이 marker는 32MB 딕셔너리/확률 테이블 할당 없이 직접 복사한다.
 
 ---
 
