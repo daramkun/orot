@@ -84,28 +84,6 @@ size_t lzma_decompress(
     if (!pt) return 0;
     pt->reset(lc, lp);
 
-    /* Allocate dictionary ring buffer */
-    uint32_t dmask = dict_size - 1;
-    /* Dict size must be power of 2 for mask trick; if not, use full size */
-    bool     pow2  = (dict_size & dmask) == 0;
-    if (!pow2) dmask = 0xFFFFFFFFu;  /* fallback: modulo (slower but correct) */
-
-    std::unique_ptr<uint8_t[]> dict_buf(new (std::nothrow) uint8_t[dict_size]());
-    if (!dict_buf) return 0;
-
-    uint32_t dict_pos = 0;  /* next write pos in ring buffer */
-
-    auto dict_get = [&](uint32_t dist1) -> uint8_t {
-        /* dist1 = 1-based distance (dist+1), so actual offset = dist1 from write head */
-        uint32_t off = (dict_pos + dict_size - (dist1 % dict_size)) % dict_size;
-        return dict_buf[off];
-    };
-
-    auto dict_put = [&](uint8_t b) {
-        dict_buf[dict_pos] = b;
-        dict_pos = (dict_pos + 1 == dict_size) ? 0 : dict_pos + 1;
-    };
-
     /* Init range decoder (5 bytes after the 13-byte header) */
     RangeDecoder rd;
     if (!rd.init(src + 13, src_len - 13)) return 0;
@@ -119,22 +97,26 @@ size_t lzma_decompress(
                    | (prev >> (8 - lc)));
     };
 
+    auto hist_get = [&](uint32_t dist1) -> uint8_t {
+        return (dist1 <= out_pos) ? dst[out_pos - dist1] : 0;
+    };
+
     for (;;) {
         if (has_usz && out_pos >= usz) break;
 
         int ps = (int)(out_pos & (uint32_t)pos_mask);
-        uint8_t prev_byte = (out_pos > 0) ? dict_get(1) : 0;
+        uint8_t prev_byte = (out_pos > 0) ? dst[out_pos - 1] : 0;
         int lctx = lit_ctx(out_pos, prev_byte);
 
         if (rd.decode_bit(&pt->is_match[state.state][ps]) == 0) {
             /* Literal */
             uint8_t match_byte = (out_pos > 0 && rep[0] + 1 <= out_pos)
-                                 ? dict_get(rep[0] + 1) : 0;
+                                 ? hist_get(rep[0] + 1) : 0;
 
             uint8_t byte = decode_literal(rd, *pt, match_byte,
                                           state.is_char_state(), lctx);
-            if (out_pos < dst_cap) dst[out_pos] = byte;
-            dict_put(byte);
+            if (out_pos >= dst_cap) return 0;
+            dst[out_pos] = byte;
             state.update_literal();
             out_pos++;
 
@@ -162,9 +144,9 @@ size_t lzma_decompress(
                     if (rd.decode_bit(&pt->is_rep0_long[state.state][ps]) == 0) {
                         /* Short rep: 1-byte match with rep0 */
                         state.update_short_rep();
-                        uint8_t b = (rep[0] + 1 <= out_pos) ? dict_get(rep[0] + 1) : 0;
-                        if (out_pos < dst_cap) dst[out_pos] = b;
-                        dict_put(b);
+                        uint8_t b = (rep[0] + 1 <= out_pos) ? hist_get(rep[0] + 1) : 0;
+                        if (out_pos >= dst_cap) return 0;
+                        dst[out_pos] = b;
                         out_pos++;
                         continue;
                     }
@@ -189,18 +171,35 @@ size_t lzma_decompress(
             }
 
             /* Copy len bytes from distance dist0+1 */
-            if (dist0 + 1 > out_pos && out_pos != 0) {
+            const uint64_t dist1_u64 = static_cast<uint64_t>(dist0) + 1u;
+            if (dist1_u64 > dict_size) return 0;
+            if (dist1_u64 > out_pos && out_pos != 0) {
                 /* Dictionary underflow — corrupt input */
                 return 0;
             }
 
-            for (uint32_t k = 0; k < len; ++k) {
-                uint8_t b = dict_get(dist0 + 1);
-                if (out_pos < dst_cap) dst[out_pos] = b;
-                dict_put(b);
-                out_pos++;
-                if (has_usz && out_pos >= usz) break;
+            size_t copy_len = len;
+            if (has_usz && out_pos + copy_len > usz)
+                copy_len = static_cast<size_t>(usz - out_pos);
+            if (out_pos + copy_len > dst_cap) return 0;
+
+            const size_t dist1 = static_cast<size_t>(dist1_u64);
+            uint8_t* out = dst + out_pos;
+            if (dist1 == 1) {
+                std::memset(out, out[-1], copy_len);
+            } else if (dist1 >= copy_len) {
+                std::memcpy(out, out - dist1, copy_len);
+            } else {
+                std::memcpy(out, out - dist1, dist1);
+                size_t filled = dist1;
+                while (filled < copy_len) {
+                    const size_t chunk = (filled < copy_len - filled)
+                        ? filled : copy_len - filled;
+                    std::memcpy(out + filled, out, chunk);
+                    filled += chunk;
+                }
             }
+            out_pos += copy_len;
         }
 
         if (rd.corrupted) return 0;
