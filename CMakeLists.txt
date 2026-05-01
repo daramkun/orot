@@ -17,6 +17,7 @@ option(OROT_BENCHMARK_COMPARE    "Build comparison benchmarks (needs zlib+libdef
 option(OROT_DEFLATE_FUZZ         "Build fuzz targets"                                OFF)
 option(OROT_SHARED               "Build shared library"                              OFF)
 option(OROT_DEFLATE_ZLIB_COMPAT  "Build zlib-compatible C aliases"                   ON)
+option(OROT_USE_SYSTEM_BACKENDS  "Use optional system codec libraries for compatible whole-buffer acceleration" ON)
 
 include(cmake/DetectSIMD.cmake)
 include(cmake/CompilerFlags.cmake)
@@ -217,6 +218,75 @@ target_compile_definitions(orot PRIVATE
     OROT_HAS_ZSTD
     OROT_HAS_BROTLI
 )
+
+if(OROT_USE_SYSTEM_BACKENDS)
+  find_library(OROT_LIBDEFLATE_LIB deflate
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(OROT_LIBDEFLATE_INCLUDE libdeflate.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(OROT_LIBDEFLATE_LIB AND OROT_LIBDEFLATE_INCLUDE)
+    target_compile_definitions(orot PRIVATE OROT_HAS_LIBDEFLATE_BACKEND)
+    target_include_directories(orot PRIVATE ${OROT_LIBDEFLATE_INCLUDE})
+    target_link_libraries(orot PRIVATE ${OROT_LIBDEFLATE_LIB})
+  endif()
+
+  find_library(OROT_LZ4_LIB lz4
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(OROT_LZ4_INCLUDE lz4.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(OROT_LZ4_LIB AND OROT_LZ4_INCLUDE)
+    target_compile_definitions(orot PRIVATE OROT_HAS_LZ4_BACKEND)
+    target_include_directories(orot PRIVATE ${OROT_LZ4_INCLUDE})
+    target_link_libraries(orot PRIVATE ${OROT_LZ4_LIB})
+  endif()
+
+  find_library(OROT_LIBLZMA_LIB lzma
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(OROT_LIBLZMA_INCLUDE lzma.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(OROT_LIBLZMA_LIB AND OROT_LIBLZMA_INCLUDE)
+    target_compile_definitions(orot PRIVATE OROT_HAS_LIBLZMA_BACKEND)
+    target_include_directories(orot PRIVATE ${OROT_LIBLZMA_INCLUDE})
+    target_link_libraries(orot PRIVATE ${OROT_LIBLZMA_LIB})
+  endif()
+
+  find_library(OROT_BZ2_LIB bz2
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(OROT_BZ2_INCLUDE bzlib.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(OROT_BZ2_LIB AND OROT_BZ2_INCLUDE)
+    target_compile_definitions(orot PRIVATE OROT_HAS_BZ2_BACKEND)
+    target_include_directories(orot PRIVATE ${OROT_BZ2_INCLUDE})
+    target_link_libraries(orot PRIVATE ${OROT_BZ2_LIB})
+  endif()
+
+  find_library(OROT_ZSTD_LIB zstd
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(OROT_ZSTD_INCLUDE zstd.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(OROT_ZSTD_LIB AND OROT_ZSTD_INCLUDE)
+    target_compile_definitions(orot PRIVATE OROT_HAS_ZSTD_BACKEND)
+    target_include_directories(orot PRIVATE ${OROT_ZSTD_INCLUDE})
+    target_link_libraries(orot PRIVATE ${OROT_ZSTD_LIB})
+  endif()
+
+  find_library(OROT_BROTLI_DEC_LIB brotlidec
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_library(OROT_BROTLI_ENC_LIB brotlienc
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_library(OROT_BROTLI_COMMON_LIB brotlicommon
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(OROT_BROTLI_INCLUDE brotli/encode.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(OROT_BROTLI_DEC_LIB AND OROT_BROTLI_ENC_LIB AND OROT_BROTLI_COMMON_LIB AND OROT_BROTLI_INCLUDE)
+    target_compile_definitions(orot PRIVATE OROT_HAS_BROTLI_BACKEND)
+    target_include_directories(orot PRIVATE ${OROT_BROTLI_INCLUDE})
+    target_link_libraries(orot PRIVATE
+        ${OROT_BROTLI_ENC_LIB}
+        ${OROT_BROTLI_DEC_LIB}
+        ${OROT_BROTLI_COMMON_LIB})
+  endif()
+endif()
 
 deflate_set_compiler_flags(orot)
 

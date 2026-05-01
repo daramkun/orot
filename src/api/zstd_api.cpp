@@ -1,7 +1,13 @@
 #include "orot/zstd.h"
 #include "zstd/zstd.hpp"
 
+#if defined(OROT_HAS_ZSTD_BACKEND)
+#include <zstd.h>
+#include <zstd_errors.h>
+#endif
+
 #include <cstdint>
+#include <climits>
 #include <new>
 #include <vector>
 
@@ -49,11 +55,29 @@ static bool set_bytes(std::vector<uint8_t>& dst, const void* src, int len) {
     return true;
 }
 
+#if defined(OROT_HAS_ZSTD_BACKEND)
+static ZSTD_CCtx* zstd_backend_cctx() noexcept {
+    thread_local ZSTD_CCtx* ctx = ZSTD_createCCtx();
+    return ctx;
+}
+
+static ZSTD_DCtx* zstd_backend_dctx() noexcept {
+    thread_local ZSTD_DCtx* ctx = ZSTD_createDCtx();
+    return ctx;
+}
+#endif
+
 } // namespace
 
 extern "C" {
 
 int orot_zstd_compress_bound(int src_size) {
+#if defined(OROT_HAS_ZSTD_BACKEND)
+    if (src_size < 0) return -1;
+    const size_t bound = ZSTD_compressBound(static_cast<size_t>(src_size));
+    if (bound <= static_cast<size_t>(INT_MAX))
+        return static_cast<int>(bound);
+#endif
     return orot::zstd::zstd_compress_bound(src_size);
 }
 
@@ -62,6 +86,23 @@ int orot_zstd_compress(
     void*       dst, int dst_cap,
     int         level)
 {
+    if (level < orot::zstd::ZSTD_MIN_LEVEL || level > orot::zstd::ZSTD_MAX_LEVEL)
+        return -1;
+#if defined(OROT_HAS_ZSTD_BACKEND)
+    if (src_size < 0 || dst_cap < 0 || (src_size > 0 && !src) || !dst)
+        return -1;
+    ZSTD_CCtx* ctx = zstd_backend_cctx();
+    if (!ctx) return -1;
+    const size_t n = ZSTD_compressCCtx(
+        ctx,
+        dst, static_cast<size_t>(dst_cap),
+        src, static_cast<size_t>(src_size),
+        level);
+    if (!ZSTD_isError(n) && n <= static_cast<size_t>(INT_MAX))
+        return static_cast<int>(n);
+    if (ZSTD_getErrorCode(n) == ZSTD_error_dstSize_tooSmall) return -2;
+#endif
+
     return orot::zstd::zstd_compress(
         static_cast<const uint8_t*>(src), src_size,
         static_cast<uint8_t*>(dst), dst_cap,
@@ -72,6 +113,20 @@ int orot_zstd_decompress(
     const void* src, int src_size,
     void*       dst, int dst_cap)
 {
+#if defined(OROT_HAS_ZSTD_BACKEND)
+    if (src_size < 0 || dst_cap < 0 || (src_size > 0 && !src) || !dst)
+        return -1;
+    ZSTD_DCtx* ctx = zstd_backend_dctx();
+    if (!ctx) return -1;
+    const size_t n = ZSTD_decompressDCtx(
+        ctx,
+        dst, static_cast<size_t>(dst_cap),
+        src, static_cast<size_t>(src_size));
+    if (!ZSTD_isError(n) && n <= static_cast<size_t>(INT_MAX))
+        return static_cast<int>(n);
+    if (ZSTD_getErrorCode(n) == ZSTD_error_dstSize_tooSmall) return -2;
+#endif
+
     return orot::zstd::zstd_decompress(
         static_cast<const uint8_t*>(src), src_size,
         static_cast<uint8_t*>(dst), dst_cap);

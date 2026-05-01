@@ -148,6 +148,7 @@ orot/
 | `OROT_BENCHMARK` | OFF | DEFLATE 성능 벤치마크 (→ `bench_deflate`) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | zlib 호환 매크로 별칭 (Z_OK 등) |
 | `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
+| `OROT_USE_SYSTEM_BACKENDS` | ON | 설치된 기준 라이브러리(libdeflate/liblz4/liblzma/libbz2/libzstd/libbrotli)를 감지해 호환 whole-buffer 경로를 가속 |
 | `OROT_BENCHMARK_COMPARE` | OFF | DEFLATE 비교 벤치마크 (→ `bench_deflate_compare`, zlib+libdeflate 필요) |
 | `OROT_TESTS` | OFF | 교차 라이브러리 호환성 테스트 |
 | `OROT_BENCHMARK` | OFF | LZ4 성능 벤치마크 (→ `bench_lz4`) |

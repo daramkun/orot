@@ -6,6 +6,9 @@
 #if defined(DEFLATE_THREADS_ENABLED)
 #include "decompress/parallel_decompress.hpp"
 #endif
+#if defined(OROT_HAS_LIBDEFLATE_BACKEND)
+#include <libdeflate.h>
+#endif
 
 #include <cstring>
 #include <cstdlib>
@@ -33,6 +36,33 @@ deflate_allocator g_alloc = {
     nullptr
 };
 
+#if defined(OROT_HAS_LIBDEFLATE_BACKEND)
+static libdeflate_compressor* backend_compressor(int level) noexcept {
+    int lv = level;
+    if (lv < 0) lv = 0;
+    if (lv > 12) lv = 12;
+    thread_local libdeflate_compressor* compressors[13] = {};
+    if (!compressors[lv])
+        compressors[lv] = libdeflate_alloc_compressor(lv);
+    return compressors[lv];
+}
+
+static libdeflate_decompressor* backend_decompressor() noexcept {
+    thread_local libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
+    return decompressor;
+}
+
+static deflate_result map_backend_result(libdeflate_result result) noexcept {
+    switch (result) {
+    case LIBDEFLATE_SUCCESS: return DEFLATE_OK;
+    case LIBDEFLATE_BAD_DATA: return DEFLATE_DATA_ERROR;
+    case LIBDEFLATE_SHORT_OUTPUT: return DEFLATE_NEED_OUTPUT;
+    case LIBDEFLATE_INSUFFICIENT_SPACE: return DEFLATE_NEED_OUTPUT;
+    }
+    return DEFLATE_DATA_ERROR;
+}
+#endif
+
 } /* anonymous namespace */
 
 extern "C" {
@@ -46,6 +76,15 @@ void deflate_set_allocator(const deflate_allocator* alloc) {
 /* ── Whole-buffer API ────────────────────────────────────────────────────── */
 
 size_t deflate_compress_bound(size_t in_size, deflate_format format) {
+#if defined(OROT_HAS_LIBDEFLATE_BACKEND)
+    if (auto* c = backend_compressor(6)) {
+        switch (format) {
+        case DEFLATE_FORMAT_RAW:  return libdeflate_deflate_compress_bound(c, in_size);
+        case DEFLATE_FORMAT_ZLIB: return libdeflate_zlib_compress_bound(c, in_size);
+        case DEFLATE_FORMAT_GZIP: return libdeflate_gzip_compress_bound(c, in_size);
+        }
+    }
+#endif
     size_t n = orot::deflate::raw_compress_bound(in_size);
     switch (format) {
     case DEFLATE_FORMAT_ZLIB: n += 6;  break;
@@ -63,6 +102,24 @@ size_t deflate_compress(
 {
     const auto* src = static_cast<const uint8_t*>(in);
     auto*       dst = static_cast<uint8_t*>(out);
+
+#if defined(OROT_HAS_LIBDEFLATE_BACKEND)
+    if (auto* c = backend_compressor(level)) {
+        size_t n = 0;
+        switch (format) {
+        case DEFLATE_FORMAT_RAW:
+            n = libdeflate_deflate_compress(c, src, in_size, dst, out_capacity);
+            break;
+        case DEFLATE_FORMAT_ZLIB:
+            n = libdeflate_zlib_compress(c, src, in_size, dst, out_capacity);
+            break;
+        case DEFLATE_FORMAT_GZIP:
+            n = libdeflate_gzip_compress(c, src, in_size, dst, out_capacity);
+            break;
+        }
+        if (n != 0) return n;
+    }
+#endif
 
     switch (format) {
     case DEFLATE_FORMAT_RAW:
@@ -83,6 +140,27 @@ deflate_result deflate_decompress(
 {
     const auto* src = static_cast<const uint8_t*>(in);
     auto*       dst = static_cast<uint8_t*>(out);
+
+#if defined(OROT_HAS_LIBDEFLATE_BACKEND)
+    if (auto* d = backend_decompressor()) {
+        size_t actual = 0;
+        libdeflate_result r = LIBDEFLATE_BAD_DATA;
+        switch (format) {
+        case DEFLATE_FORMAT_RAW:
+            r = libdeflate_deflate_decompress(d, src, in_size, dst, out_capacity, &actual);
+            break;
+        case DEFLATE_FORMAT_ZLIB:
+            r = libdeflate_zlib_decompress(d, src, in_size, dst, out_capacity, &actual);
+            break;
+        case DEFLATE_FORMAT_GZIP:
+            r = libdeflate_gzip_decompress(d, src, in_size, dst, out_capacity, &actual);
+            break;
+        }
+        if (r == LIBDEFLATE_SUCCESS && actual_out_size)
+            *actual_out_size = actual;
+        return map_backend_result(r);
+    }
+#endif
 
     switch (format) {
     case DEFLATE_FORMAT_RAW:

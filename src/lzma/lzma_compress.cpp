@@ -164,6 +164,20 @@ static void encode_literal(RangeEncoder& rc, LzmaProbTables& pt,
     }
 }
 
+static bool is_high_entropy_sample(const uint8_t* src, size_t src_len) noexcept {
+    if (!src || src_len < 4096) return false;
+
+    uint8_t seen[256] = {};
+    const size_t sample_len = std::min(src_len, static_cast<size_t>(65536));
+    for (size_t i = 0; i < sample_len; ++i)
+        seen[src[i]] = 1;
+
+    int distinct = 0;
+    for (int i = 0; i < 256; ++i)
+        distinct += seen[i];
+    return distinct >= 240;
+}
+
 /* ── Main compressor ─────────────────────────────────────────────────────── */
 
 size_t lzma_compress(
@@ -173,6 +187,12 @@ size_t lzma_compress(
 {
     LzmaConfig cfg = lzma_config_for_level(level);
     if (dst_cap < lzma_compress_bound(src_len)) return 0;
+
+    if (is_high_entropy_sample(src, src_len)) {
+        cfg.lc = 0;
+        cfg.lp = 0;
+        cfg.pb = 0;
+    }
 
     /* Cap dict_size and hash table to actual input size (no point in larger). */
     if (src_len > 0) {

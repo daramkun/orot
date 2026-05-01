@@ -26,7 +26,7 @@ C++20 무손실 압축/해제 라이브러리. Raw DEFLATE (RFC 1951), zlib (RFC
 
 - CMake 3.20+
 - C++20 컴파일러 (GCC 10+, Clang 12+, MSVC 2022+)
-- (비교 벤치마크/호환성 테스트용) zlib, libdeflate, liblz4, liblzma, libbz2, libzstd
+- (비교 벤치마크/호환성 테스트/선택적 가속 백엔드용) zlib, libdeflate, liblz4, liblzma, libbz2, libzstd, libbrotli
 
 ## 빌드
 
@@ -67,6 +67,7 @@ cmake --install build --prefix /usr/local
 | `OROT_DEFLATE_FUZZ` | OFF | libFuzzer 퍼즈 타겟 |
 | `OROT_SHARED` | OFF | 공유 라이브러리 (기본: 정적) |
 | `OROT_DEFLATE_ZLIB_COMPAT` | ON | `Z_OK` 등 zlib 호환 매크로 |
+| `OROT_USE_SYSTEM_BACKENDS` | ON | 설치된 기준 라이브러리로 호환 whole-buffer 경로 가속 |
 | `OROT_BENCHMARK` | OFF | 알고리즘별 단일 라이브러리 벤치마크 |
 | `OROT_BENCHMARK_COMPARE` | OFF | 알고리즘별 외부 라이브러리 비교 벤치마크 |
 
