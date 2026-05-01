@@ -348,7 +348,7 @@ int main(int argc, char** argv) {
     Dataset datasets[] = {
         {"text (~800KB)", "text", make_text()},
         {"mixed (~45KB)", "mixed", make_mixed()},
-        {"random (64KB)", "random", make_random(64 * 1024)},
+        {"random (1MB)", "random", make_random(1 << 20)},
     };
 
     for (const auto& ds : datasets) {

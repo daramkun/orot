@@ -23,6 +23,12 @@ bool PrefixCode::build(const uint8_t* lengths, int alphabet_size) noexcept {
     max_length = 0;
     single_symbol = 0;
     is_single_symbol = false;
+    std::memset(symbols, 0, sizeof(symbols));
+    std::memset(first_code, 0, sizeof(first_code));
+    std::memset(first_index, 0, sizeof(first_index));
+    std::memset(code_count, 0, sizeof(code_count));
+    std::memset(lookup_symbol, 0, sizeof(lookup_symbol));
+    std::memset(lookup_length, 0, sizeof(lookup_length));
 
     int nonzero = 0;
     for (int i = 0; i < alphabet_size; ++i) {
@@ -68,6 +74,33 @@ bool PrefixCode::build(const uint8_t* lengths, int alphabet_size) noexcept {
         }
     }
 
+    int index = 0;
+    for (int len = 1; len <= max_length; ++len) {
+        first_code[len] = static_cast<uint16_t>(next_code[len] - bl_count[len]);
+        first_index[len] = static_cast<uint16_t>(index);
+        code_count[len] = static_cast<uint16_t>(bl_count[len]);
+        for (int i = 0; i < num_entries; ++i) {
+            if (entries[i].length == len)
+                symbols[index++] = entries[i].symbol;
+        }
+    }
+
+    for (int i = 0; i < num_entries; ++i) {
+        const PrefixCodeEntry& e = entries[i];
+        if (e.length > kLookupBits)
+            continue;
+
+        uint32_t reversed = 0;
+        for (int bit = 0; bit < e.length; ++bit)
+            reversed = (reversed << 1) | ((e.code >> bit) & 1u);
+        int reps = 1 << (kLookupBits - e.length);
+        for (int r = 0; r < reps; ++r) {
+            int idx = static_cast<int>(reversed | (static_cast<uint32_t>(r) << e.length));
+            lookup_symbol[idx] = e.symbol;
+            lookup_length[idx] = e.length;
+        }
+    }
+
     return true;
 }
 
@@ -75,15 +108,27 @@ int PrefixCode::decode(BitReader& br) const noexcept {
     if (is_single_symbol)
         return single_symbol;
 
+    int lookup_bits = max_length < kLookupBits ? max_length : kLookupBits;
+    if (lookup_bits > 0 && br.available_bits() >= static_cast<size_t>(lookup_bits)) {
+        (void)br.fill(lookup_bits);
+        uint32_t idx = static_cast<uint32_t>(br.bits) & ((1u << lookup_bits) - 1u);
+        uint8_t len = lookup_length[idx];
+        if (len != 0) {
+            uint16_t sym = lookup_symbol[idx];
+            (void)br.read_bits(len);
+            return sym;
+        }
+    }
+
     uint32_t code = 0;
     for (int len = 1; len <= max_length; ++len) {
         code = (code << 1) | br.read_bits(1);
         if (br.error)
             return -1;
-        for (int i = 0; i < num_entries; ++i) {
-            if (entries[i].length == len && entries[i].code == code)
-                return entries[i].symbol;
-        }
+        uint32_t first = first_code[len];
+        uint32_t count = code_count[len];
+        if (code >= first && code - first < count)
+            return symbols[first_index[len] + (code - first)];
     }
     br.error = true;
     return -1;

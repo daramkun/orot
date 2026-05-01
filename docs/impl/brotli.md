@@ -76,7 +76,10 @@ match에 short distance code 0을 사용한다.
 q5 이하에서는 고다양성 바이트 샘플을 압축 불가능한 입력으로 빠르게 판별하고,
 긴 match 내부 hash insert는 샘플링해 encode 비용을 낮춘다. Decoder는
 uncompressed meta-block을 `memcpy`로 복사하고, copy command 실행도
-`memcpy`/반복 확장 copy fast path를 사용한다.
+`memcpy`/반복 확장 copy fast path를 사용한다. Prefix code decoder는 짧은
+code용 direct lookup table과 긴 code용 canonical first-code table을 함께 사용해
+linear entry scan을 피한다. 단일 block type meta-block은 block switch counter
+갱신을 생략하고, all-zero context map은 per-symbol map lookup을 건너뛴다.
 Complex prefix code의 repeated
 code-length는 Brotli reference와 같이 읽는 즉시 Huffman space와 symbol position에
 반영한다. Insert/copy-length command table은 Google Brotli decoder의 `kCmdLut`
@@ -144,4 +147,5 @@ BUILD_DIR=build-fuzz MAX_TOTAL_TIME=60 sh tests/fuzz/run_brotli_fuzz.sh
 1. encoder용 빈도 기반 literal prefix code 생성
 2. command/distance alphabet 4개 초과 시 canonical prefix code 생성
 3. last-distance short code 1..15 및 lazy match scoring 개선
-4. decoder real-world corpus 확대와 dictionary-heavy stream 보강
+4. libbrotlienc mixed/context-heavy stream의 literal context fast path 보강
+5. decoder real-world corpus 확대와 dictionary-heavy stream 보강

@@ -243,6 +243,13 @@ static int distance_context_id(int copy_len) noexcept {
     return 3;
 }
 
+static bool all_zero_map(const std::vector<uint8_t>& map) noexcept {
+    for (uint8_t v : map)
+        if (v != 0)
+            return false;
+    return true;
+}
+
 static void copy_match_bytes(
     uint8_t* dst,
     size_t out_pos,
@@ -281,6 +288,10 @@ struct BlockState {
         header = &h;
         type = 0;
         remaining = h.block_count;
+    }
+
+    bool is_single_type() const noexcept {
+        return header && header->num_types == 1;
     }
 
     bool advance(BitReader& br) noexcept {
@@ -340,9 +351,14 @@ static BrotliDecodeStatus decode_compressed_meta_block(
     literal_block.init(header.block_categories[0]);
     command_block.init(header.block_categories[1]);
     distance_block.init(header.block_categories[2]);
+    const bool single_literal_block = literal_block.is_single_type();
+    const bool single_command_block = command_block.is_single_type();
+    const bool single_distance_block = distance_block.is_single_type();
+    const bool literal_map_all_zero = all_zero_map(header.literal_context_map);
+    const bool distance_map_all_zero = all_zero_map(header.distance_context_map);
 
     while (produced < meta_len) {
-        if (!command_block.advance(br))
+        if (!single_command_block && !command_block.advance(br))
             return BrotliDecodeStatus::DataError;
         if (command_block.type < 0 ||
             static_cast<size_t>(command_block.type) >= header.command_trees.size())
@@ -363,7 +379,7 @@ static BrotliDecodeStatus decode_compressed_meta_block(
             return BrotliDecodeStatus::NeedOutput;
 
         for (int i = 0; i < lengths.insert_len; ++i) {
-            if (!literal_block.advance(br))
+            if (!single_literal_block && !literal_block.advance(br))
                 return BrotliDecodeStatus::DataError;
             if (literal_block.type < 0 ||
                 static_cast<size_t>(literal_block.type) >=
@@ -379,7 +395,7 @@ static BrotliDecodeStatus decode_compressed_meta_block(
                 return BrotliDecodeStatus::Unsupported;
 
             int literal_tree_index = literal_block.type;
-            if (!header.literal_context_map.empty()) {
+            if (!literal_map_all_zero) {
                 size_t map_index = static_cast<size_t>(literal_block.type) * 64u
                     + static_cast<size_t>(context_id);
                 if (map_index >= header.literal_context_map.size())
@@ -404,10 +420,10 @@ static BrotliDecodeStatus decode_compressed_meta_block(
         int distance = last_distances[0];
         bool should_push_distance = false;
         if (!lengths.implicit_distance) {
-            if (!distance_block.advance(br))
+            if (!single_distance_block && !distance_block.advance(br))
                 return BrotliDecodeStatus::DataError;
             int distance_tree_index = distance_block.type;
-            if (!header.distance_context_map.empty()) {
+            if (!distance_map_all_zero) {
                 size_t map_index = static_cast<size_t>(distance_block.type) * 4u
                     + static_cast<size_t>(distance_context_id(lengths.copy_len));
                 if (map_index >= header.distance_context_map.size())

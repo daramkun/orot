@@ -15,7 +15,15 @@ struct PrefixCodeEntry {
 
 struct PrefixCode {
     static constexpr int kMaxEntries = 704;
+    static constexpr int kLookupBits = 8;
+    static constexpr int kLookupSize = 1 << kLookupBits;
     PrefixCodeEntry entries[kMaxEntries];
+    uint16_t symbols[kMaxEntries];
+    uint16_t first_code[16];
+    uint16_t first_index[16];
+    uint16_t code_count[16];
+    uint16_t lookup_symbol[kLookupSize];
+    uint8_t lookup_length[kLookupSize];
     int num_entries = 0;
     int max_length = 0;
     uint16_t single_symbol = 0;

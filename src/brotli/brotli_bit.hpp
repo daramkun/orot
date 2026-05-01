@@ -62,6 +62,11 @@ struct BitReader {
         return src;
     }
 
+    size_t available_bits() const noexcept {
+        return static_cast<size_t>(bit_count) +
+            static_cast<size_t>(end - src) * 8u;
+    }
+
     bool consume_bytes(size_t n) noexcept {
         if ((bit_count & 7) != 0) {
             error = true;
