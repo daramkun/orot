@@ -65,13 +65,18 @@ libbrotlienc q5/q9 장문 텍스트, 분포 변화가 큰 block/context 샘플,
 `NPOSTFIX/NDIRECT`를 강제한 distance parameter 샘플을 포함한다. Encoder는 기존
 uncompressed meta-block fallback을 유지하면서, `quality > 0`이고 단일
 meta-block으로 표현 가능한 입력은 compressed meta-block을 우선 출력한다.
-Literal alphabet이 4개 이하인 경우 simple prefix code를 쓰고, 일반 literal
-alphabet은 검증된 256개 literal 8-bit complex prefix code로 출력한다. 반복이
-발견되면 hash-table 기반 greedy match 탐색으로 여러 insert/copy command와 distance
-code를 출력한다. Command/distance alphabet이 4개 이하이면 simple prefix code를
-쓰고, 그보다 크면 literal-only compressed block으로 fallback한다. Encoder는
-last-distance ring buffer의 선두 distance와 일치하는 match에 short distance code
-0을 사용한다. match가 없으면 literal-only compressed block을 출력한다.
+Literal alphabet이 4개 이하인 경우 simple prefix code 기반 literal-only
+compressed block을 쓴다. 일반 literal alphabet 입력은 압축 이득이 작거나 현재
+command/distance simple prefix code 범위를 벗어나면 uncompressed meta-block으로
+빠르게 fallback한다. 반복이 발견되면 hash-table 기반 greedy match 탐색으로 여러
+insert/copy command와 distance code를 출력한다. Command/distance alphabet이 4개
+이하이면 simple prefix code를 쓰고, 그보다 크면 uncompressed meta-block으로
+fallback한다. Encoder는 last-distance ring buffer의 선두 distance와 일치하는
+match에 short distance code 0을 사용한다.
+q5 이하에서는 고다양성 바이트 샘플을 압축 불가능한 입력으로 빠르게 판별하고,
+긴 match 내부 hash insert는 샘플링해 encode 비용을 낮춘다. Decoder는
+uncompressed meta-block을 `memcpy`로 복사하고, copy command 실행도
+`memcpy`/반복 확장 copy fast path를 사용한다.
 Complex prefix code의 repeated
 code-length는 Brotli reference와 같이 읽는 즉시 Huffman space와 symbol position에
 반영한다. Insert/copy-length command table은 Google Brotli decoder의 `kCmdLut`
@@ -137,5 +142,6 @@ BUILD_DIR=build-fuzz MAX_TOTAL_TIME=60 sh tests/fuzz/run_brotli_fuzz.sh
 ## 다음 단계
 
 1. encoder용 빈도 기반 literal prefix code 생성
-2. last-distance short code 1..15 및 lazy match scoring 개선
-3. decoder real-world corpus 확대와 dictionary-heavy stream 보강
+2. command/distance alphabet 4개 초과 시 canonical prefix code 생성
+3. last-distance short code 1..15 및 lazy match scoring 개선
+4. decoder real-world corpus 확대와 dictionary-heavy stream 보강

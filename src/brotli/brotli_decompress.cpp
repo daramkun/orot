@@ -4,6 +4,7 @@
 #include "brotli_dictionary.hpp"
 #include "brotli_meta.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace orot { namespace brotli {
@@ -242,6 +243,35 @@ static int distance_context_id(int copy_len) noexcept {
     return 3;
 }
 
+static void copy_match_bytes(
+    uint8_t* dst,
+    size_t out_pos,
+    size_t distance,
+    size_t len) noexcept
+{
+    uint8_t* out = dst + out_pos;
+    const uint8_t* from = out - distance;
+
+    if (distance == 1) {
+        std::memset(out, from[0], len);
+        return;
+    }
+    if (distance >= len) {
+        std::memcpy(out, from, len);
+        return;
+    }
+
+    size_t copied = 0;
+    size_t seed = std::min(distance, len);
+    std::memcpy(out, from, seed);
+    copied = seed;
+    while (copied < len) {
+        size_t chunk = std::min(copied, len - copied);
+        std::memcpy(out + copied, out, chunk);
+        copied += chunk;
+    }
+}
+
 struct BlockState {
     const BlockCategoryHeader* header = nullptr;
     int type = 0;
@@ -420,9 +450,9 @@ static BrotliDecodeStatus decode_compressed_meta_block(
                 return BrotliDecodeStatus::DataError;
             if (out_pos + static_cast<size_t>(lengths.copy_len) > dst_cap)
                 return BrotliDecodeStatus::NeedOutput;
-            for (int i = 0; i < lengths.copy_len; ++i)
-                dst[out_pos + static_cast<size_t>(i)] =
-                    dst[out_pos - static_cast<size_t>(distance) + static_cast<size_t>(i)];
+            copy_match_bytes(
+                dst, out_pos, static_cast<size_t>(distance),
+                static_cast<size_t>(lengths.copy_len));
             out_pos += static_cast<size_t>(lengths.copy_len);
             produced += static_cast<size_t>(lengths.copy_len);
         }

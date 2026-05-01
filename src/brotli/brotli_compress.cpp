@@ -279,6 +279,30 @@ static int collect_literals(
     return count;
 }
 
+static bool has_simple_literal_alphabet(const uint8_t* src, size_t src_len) noexcept {
+    uint16_t symbols[4] = {};
+    return collect_literals(src, src_len, symbols) > 0;
+}
+
+static bool has_high_byte_diversity(const uint8_t* src, size_t src_len) noexcept {
+    if (src_len < 32768)
+        return false;
+
+    bool seen[256];
+    std::memset(seen, 0, sizeof(seen));
+    int count = 0;
+    size_t limit = std::min(src_len, static_cast<size_t>(8192));
+    for (size_t i = 0; i < limit; ++i) {
+        uint8_t b = src[i];
+        if (seen[b])
+            continue;
+        seen[b] = true;
+        if (++count > 200)
+            return true;
+    }
+    return false;
+}
+
 static int literal_symbol_index(
     const uint16_t* symbols,
     int count,
@@ -435,6 +459,67 @@ static void insert_hash_position(
         table[hash4(src + pos)] = static_cast<int>(pos);
 }
 
+static void insert_match_coverage(
+    const uint8_t* src,
+    size_t src_len,
+    size_t pos,
+    size_t len,
+    int quality,
+    int* table) noexcept
+{
+    if (len == 0)
+        return;
+
+    insert_hash_position(src, src_len, pos, table);
+    if (len <= 16) {
+        for (size_t p = pos + 1; p < pos + len; ++p)
+            insert_hash_position(src, src_len, p, table);
+        return;
+    }
+
+    size_t step = 32;
+    if (quality >= 9)
+        step = 8;
+    else if (quality >= 5)
+        step = 64;
+    if (len >= 4096 && quality <= 5)
+        step = 256;
+
+    size_t end = pos + len;
+    for (size_t p = pos + step; p < end; p += step)
+        insert_hash_position(src, src_len, p, table);
+
+    size_t tail = end > 16 ? end - 16 : pos + 1;
+    for (size_t p = tail; p < end; ++p)
+        insert_hash_position(src, src_len, p, table);
+}
+
+static bool has_sampled_match(
+    const uint8_t* src,
+    size_t src_len,
+    int quality) noexcept
+{
+    if (src_len < 4096)
+        return true;
+
+    int table[4096];
+    std::fill(table, table + 4096, -1);
+
+    size_t step = quality >= 9 ? 1u : quality >= 5 ? 2u : 4u;
+    size_t limit = std::min(src_len - 8, static_cast<size_t>(256 * 1024));
+    for (size_t pos = 0; pos <= limit; pos += step) {
+        uint32_t h = hash4(src + pos) & 4095u;
+        int prev = table[h];
+        table[h] = static_cast<int>(pos);
+        if (prev < 0)
+            continue;
+        if (src[static_cast<size_t>(prev)] == src[pos] &&
+            std::memcmp(src + static_cast<size_t>(prev), src + pos, 8) == 0)
+            return true;
+    }
+    return false;
+}
+
 static Match find_match_from_table(
     const uint8_t* src,
     size_t src_len,
@@ -453,9 +538,31 @@ static Match find_match_from_table(
         return Match{};
 
     size_t len = 0;
-    while (pos + len < src_len &&
-           len < 65536 &&
-           src[pos + len] == src[static_cast<size_t>(prev) + len])
+    size_t max_len = std::min(src_len - pos, static_cast<size_t>(65536));
+    const uint8_t* a = src + pos;
+    const uint8_t* b = src + static_cast<size_t>(prev);
+    while (len + sizeof(size_t) <= max_len) {
+        size_t av = 0;
+        size_t bv = 0;
+        std::memcpy(&av, a + len, sizeof(av));
+        std::memcpy(&bv, b + len, sizeof(bv));
+        if (av == bv) {
+            len += sizeof(size_t);
+            continue;
+        }
+        size_t diff = av ^ bv;
+#if defined(__GNUC__) || defined(__clang__)
+        if constexpr (sizeof(size_t) == 8)
+            len += static_cast<size_t>(__builtin_ctzll(static_cast<unsigned long long>(diff)) / 8);
+        else
+            len += static_cast<size_t>(__builtin_ctz(static_cast<unsigned int>(diff)) / 8);
+#else
+        while (len < max_len && a[len] == b[len])
+            ++len;
+#endif
+        break;
+    }
+    while (len < max_len && a[len] == b[len])
         ++len;
     if (len < 8)
         return Match{};
@@ -481,6 +588,7 @@ static bool add_unique_symbol(
 static bool build_command_tokens(
     const uint8_t* src,
     size_t src_len,
+    int quality,
     TokenList& out,
     uint16_t* command_symbols,
     int& command_count,
@@ -532,8 +640,7 @@ static bool build_command_tokens(
         if (token.distance_symbol != 0)
             push_distance_encoder(token.distance, last_distances);
 
-        for (size_t p = pos; p < pos + match.len; ++p)
-            insert_hash_position(src, src_len, p, hash_table);
+        insert_match_coverage(src, src_len, pos, match.len, quality, hash_table);
         pos += match.len;
         anchor = pos;
     }
@@ -645,12 +752,16 @@ size_t brotli_compress(
 
     size_t pos = 0;
     if (quality > 0 && src_len > 0 && src_len <= kMaxMetaBlockSize) {
+        bool skip_compressed_attempt = quality <= 5 &&
+            has_high_byte_diversity(input, src_len);
         TokenList tokens;
         uint16_t command_symbols[704] = {};
         uint16_t distance_symbols[64] = {};
         int command_count = 0;
         int distance_count = 0;
-        if (build_command_tokens(input, src_len, tokens, command_symbols,
+        if (!skip_compressed_attempt &&
+            has_sampled_match(input, src_len, quality) &&
+            build_command_tokens(input, src_len, quality, tokens, command_symbols,
                                  command_count, distance_symbols, distance_count)) {
             if (!write_compressed_token_block(bw, input, src_len, tokens,
                                              command_symbols, command_count,
@@ -663,7 +774,9 @@ size_t brotli_compress(
         }
 
         uint16_t command_symbol = 0;
-        bool eligible = command_symbol_for_insert(src_len, command_symbol);
+        bool eligible = !skip_compressed_attempt &&
+            command_symbol_for_insert(src_len, command_symbol) &&
+            has_simple_literal_alphabet(input, src_len);
         if (eligible) {
             if (!write_compressed_literal_block(bw, input, src_len))
                 return 0;

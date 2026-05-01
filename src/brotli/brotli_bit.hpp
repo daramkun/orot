@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace orot { namespace brotli {
 
@@ -118,8 +119,7 @@ struct BitWriter {
             overflow = true;
             return false;
         }
-        for (size_t i = 0; i < n; ++i)
-            dst[i] = src[i];
+        std::memcpy(dst, src, n);
         dst += n;
         return true;
     }
