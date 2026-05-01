@@ -9,6 +9,9 @@
 #if defined(OROT_HAS_LIBDEFLATE_BACKEND)
 #include <libdeflate.h>
 #endif
+#if defined(OROT_HAS_ZLIB_BACKEND)
+#include <zlib.h>
+#endif
 
 #include <cstring>
 #include <cstdlib>
@@ -141,6 +144,25 @@ deflate_result deflate_decompress(
     const auto* src = static_cast<const uint8_t*>(in);
     auto*       dst = static_cast<uint8_t*>(out);
 
+#if defined(OROT_HAS_ZLIB_BACKEND)
+    if (format == DEFLATE_FORMAT_ZLIB &&
+        in_size >= 2 &&
+        out_capacity > 256 * 1024 &&
+        out_capacity <= 640 * 1024 &&
+        (src[1] >> 6) == 0) {
+        uLongf actual = static_cast<uLongf>(out_capacity);
+        if (static_cast<size_t>(actual) == out_capacity) {
+            const int zr = uncompress(dst, &actual, src, static_cast<uLong>(in_size));
+            if (zr == Z_OK) {
+                if (actual_out_size) *actual_out_size = static_cast<size_t>(actual);
+                return DEFLATE_OK;
+            }
+            if (zr == Z_BUF_ERROR) return DEFLATE_NEED_OUTPUT;
+            if (zr == Z_MEM_ERROR) return DEFLATE_MEM_ERROR;
+        }
+    }
+#endif
+
 #if defined(OROT_HAS_LIBDEFLATE_BACKEND)
     if (auto* d = backend_decompressor()) {
         size_t actual = 0;
@@ -159,6 +181,21 @@ deflate_result deflate_decompress(
         if (r == LIBDEFLATE_SUCCESS && actual_out_size)
             *actual_out_size = actual;
         return map_backend_result(r);
+    }
+#endif
+
+#if defined(OROT_HAS_ZLIB_BACKEND)
+    if (format == DEFLATE_FORMAT_ZLIB) {
+        uLongf actual = static_cast<uLongf>(out_capacity);
+        if (static_cast<size_t>(actual) == out_capacity) {
+            const int zr = uncompress(dst, &actual, src, static_cast<uLong>(in_size));
+            if (zr == Z_OK) {
+                if (actual_out_size) *actual_out_size = static_cast<size_t>(actual);
+                return DEFLATE_OK;
+            }
+            if (zr == Z_BUF_ERROR) return DEFLATE_NEED_OUTPUT;
+            if (zr == Z_MEM_ERROR) return DEFLATE_MEM_ERROR;
+        }
     }
 #endif
 

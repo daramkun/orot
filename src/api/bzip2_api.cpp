@@ -26,7 +26,7 @@ static int bz2_backend_compress(
         static_cast<char*>(dst), &out_len,
         const_cast<char*>(static_cast<const char*>(src)),
         static_cast<unsigned int>(src_size),
-        level, 0, 0);
+        level, 0, 30);
     if (r == BZ_OK && out_len <= static_cast<unsigned int>(INT_MAX))
         return static_cast<int>(out_len);
     if (r == BZ_OUTBUFF_FULL) return -2;
@@ -123,9 +123,7 @@ int orot_bzip2_decompress(
     if (!dst) return -1;
 
 #if defined(OROT_HAS_BZ2_BACKEND)
-    if (dst_cap > 0 && src_size * 100 < dst_cap * 90) {
-        return bz2_backend_decompress(src, src_size, dst, dst_cap, uncompressed_size_out);
-    }
+    return bz2_backend_decompress(src, src_size, dst, dst_cap, uncompressed_size_out);
 #endif
 
     size_t n = bzip2_decompress(

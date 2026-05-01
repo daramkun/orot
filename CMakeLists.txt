@@ -220,6 +220,12 @@ target_compile_definitions(orot PRIVATE
 )
 
 if(OROT_USE_SYSTEM_BACKENDS)
+  find_package(ZLIB QUIET)
+  if(ZLIB_FOUND)
+    target_compile_definitions(orot PRIVATE OROT_HAS_ZLIB_BACKEND)
+    target_link_libraries(orot PRIVATE ZLIB::ZLIB)
+  endif()
+
   find_library(OROT_LIBDEFLATE_LIB deflate
       HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
   find_path(OROT_LIBDEFLATE_INCLUDE libdeflate.h

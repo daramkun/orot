@@ -55,17 +55,16 @@ static bool set_bytes(std::vector<uint8_t>& dst, const void* src, int len) {
     return true;
 }
 
-#if defined(OROT_HAS_ZSTD_BACKEND)
-static ZSTD_CCtx* zstd_backend_cctx() noexcept {
-    thread_local ZSTD_CCtx* ctx = ZSTD_createCCtx();
-    return ctx;
+static bool high_entropy_sample(const void* src, int src_size) noexcept {
+    if (!src || src_size < 256 * 1024) return false;
+    const auto* bytes = static_cast<const uint8_t*>(src);
+    uint8_t seen[256] = {};
+    const int sample = src_size < 4096 ? src_size : 4096;
+    for (int i = 0; i < sample; ++i) seen[bytes[i]] = 1;
+    int distinct = 0;
+    for (uint8_t value : seen) distinct += value != 0;
+    return distinct >= 240;
 }
-
-static ZSTD_DCtx* zstd_backend_dctx() noexcept {
-    thread_local ZSTD_DCtx* ctx = ZSTD_createDCtx();
-    return ctx;
-}
-#endif
 
 } // namespace
 
@@ -88,13 +87,17 @@ int orot_zstd_compress(
 {
     if (level < orot::zstd::ZSTD_MIN_LEVEL || level > orot::zstd::ZSTD_MAX_LEVEL)
         return -1;
-#if defined(OROT_HAS_ZSTD_BACKEND)
     if (src_size < 0 || dst_cap < 0 || (src_size > 0 && !src) || !dst)
         return -1;
-    ZSTD_CCtx* ctx = zstd_backend_cctx();
-    if (!ctx) return -1;
-    const size_t n = ZSTD_compressCCtx(
-        ctx,
+    if (!high_entropy_sample(src, src_size)) {
+        const int fast = orot::zstd::zstd_compress(
+            static_cast<const uint8_t*>(src), src_size,
+            static_cast<uint8_t*>(dst), dst_cap,
+            level);
+        if (fast >= 0) return fast;
+    }
+#if defined(OROT_HAS_ZSTD_BACKEND)
+    const size_t n = ZSTD_compress(
         dst, static_cast<size_t>(dst_cap),
         src, static_cast<size_t>(src_size),
         level);
@@ -103,23 +106,35 @@ int orot_zstd_compress(
     if (ZSTD_getErrorCode(n) == ZSTD_error_dstSize_tooSmall) return -2;
 #endif
 
-    return orot::zstd::zstd_compress(
+    const int fast = orot::zstd::zstd_compress(
         static_cast<const uint8_t*>(src), src_size,
         static_cast<uint8_t*>(dst), dst_cap,
         level);
+    return fast;
 }
 
 int orot_zstd_decompress(
     const void* src, int src_size,
     void*       dst, int dst_cap)
 {
-#if defined(OROT_HAS_ZSTD_BACKEND)
     if (src_size < 0 || dst_cap < 0 || (src_size > 0 && !src) || !dst)
         return -1;
-    ZSTD_DCtx* ctx = zstd_backend_dctx();
-    if (!ctx) return -1;
-    const size_t n = ZSTD_decompressDCtx(
-        ctx,
+    if (src_size * 100 > dst_cap * 95) {
+#if defined(OROT_HAS_ZSTD_BACKEND)
+        const size_t n = ZSTD_decompress(
+            dst, static_cast<size_t>(dst_cap),
+            src, static_cast<size_t>(src_size));
+        if (!ZSTD_isError(n) && n <= static_cast<size_t>(INT_MAX))
+            return static_cast<int>(n);
+        if (ZSTD_getErrorCode(n) == ZSTD_error_dstSize_tooSmall) return -2;
+#endif
+    }
+    const int fast = orot::zstd::zstd_decompress(
+        static_cast<const uint8_t*>(src), src_size,
+        static_cast<uint8_t*>(dst), dst_cap);
+    if (fast >= 0) return fast;
+#if defined(OROT_HAS_ZSTD_BACKEND)
+    const size_t n = ZSTD_decompress(
         dst, static_cast<size_t>(dst_cap),
         src, static_cast<size_t>(src_size));
     if (!ZSTD_isError(n) && n <= static_cast<size_t>(INT_MAX))
@@ -127,9 +142,7 @@ int orot_zstd_decompress(
     if (ZSTD_getErrorCode(n) == ZSTD_error_dstSize_tooSmall) return -2;
 #endif
 
-    return orot::zstd::zstd_decompress(
-        static_cast<const uint8_t*>(src), src_size,
-        static_cast<uint8_t*>(dst), dst_cap);
+    return fast;
 }
 
 int orot_zstd_compress_dict(
