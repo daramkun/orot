@@ -47,6 +47,21 @@ static uint8_t decode_literal(RangeDecoder& rd, LzmaProbTables& pt,
     return (uint8_t)(sym - 256u);
 }
 
+static uint8_t decode_literal_plain(RangeDecoder& rd, LzmaProbTables& pt,
+                                    int lit_ctx) noexcept {
+    Prob* probs = pt.literal[lit_ctx];
+    uint32_t sym = 1;
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    sym = (sym << 1) | rd.decode_bit(&probs[sym]);
+    return (uint8_t)(sym - 256u);
+}
+
 /* ── Main decompressor ───────────────────────────────────────────────────── */
 
 size_t lzma_decompress(
@@ -92,10 +107,8 @@ size_t lzma_decompress(
     uint32_t rep[4] = { 0, 0, 0, 0 };  /* 0-based distances */
     uint64_t out_pos = 0;
 
-    auto lit_ctx = [&](uint64_t p2, uint8_t prev) -> int {
-        return (int)(((p2 & ((uint64_t)((1u << lp) - 1))) << lc)
-                   | (prev >> (8 - lc)));
-    };
+    const uint32_t lp_mask = (1u << lp) - 1u;
+    const int lit_shift = 8 - lc;
 
     auto hist_get = [&](uint32_t dist1) -> uint8_t {
         return (dist1 <= out_pos) ? dst[out_pos - dist1] : 0;
@@ -106,15 +119,19 @@ size_t lzma_decompress(
 
         int ps = (int)(out_pos & (uint32_t)pos_mask);
         uint8_t prev_byte = (out_pos > 0) ? dst[out_pos - 1] : 0;
-        int lctx = lit_ctx(out_pos, prev_byte);
+        int lctx = (int)(((out_pos & lp_mask) << lc) | (prev_byte >> lit_shift));
 
         if (rd.decode_bit(&pt->is_match[state.state][ps]) == 0) {
             /* Literal */
-            uint8_t match_byte = (out_pos > 0 && rep[0] + 1 <= out_pos)
-                                 ? hist_get(rep[0] + 1) : 0;
-
-            uint8_t byte = decode_literal(rd, *pt, match_byte,
-                                          state.is_char_state(), lctx);
+            const bool is_char = state.is_char_state();
+            uint8_t byte;
+            if (is_char) {
+                byte = decode_literal_plain(rd, *pt, lctx);
+            } else {
+                uint8_t match_byte = (out_pos > 0 && rep[0] + 1 <= out_pos)
+                                     ? hist_get(rep[0] + 1) : 0;
+                byte = decode_literal(rd, *pt, match_byte, false, lctx);
+            }
             if (out_pos >= dst_cap) return 0;
             dst[out_pos] = byte;
             state.update_literal();

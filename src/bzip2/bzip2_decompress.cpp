@@ -310,7 +310,6 @@ static bool decode_block(BitReader& br,
     for (int i = 0; i < n_in_use; ++i) mtf_sym[i] = (uint8_t)sym_map[i];
 
     uint32_t unzftab[256] = {};
-    uint32_t rle2_run_syms = 0;
     uint32_t nblock = 0;
     const int EOB = alpha_size - 1;
     uint32_t g = 0;
@@ -333,7 +332,6 @@ static bool decode_block(BitReader& br,
         if ((uint32_t)sym <= BZ_RUNB) {
             run += ((uint32_t)sym + 1) * run_mul;
             run_mul <<= 1;
-            ++rle2_run_syms;
             continue;
         }
 
@@ -392,10 +390,7 @@ static bool decode_block(BitReader& br,
     size_t   c_run_extra = 0;
     static constexpr size_t CRC_DEFER_RUN_THRESHOLD = 512;
     const size_t dst_remaining = (size_t)(out_end - out);
-    const bool defer_crc_from_start =
-        dst_remaining >= 4096 &&
-        ((uint64_t)nblock * 8u < dst_remaining ||
-         (rle2_run_syms > 0 && rle2_run_syms * 2u >= nblock));
+    const bool defer_crc_from_start = dst_remaining >= 4096;
     if (defer_crc_from_start)
         goto phase3_deferred;
 
