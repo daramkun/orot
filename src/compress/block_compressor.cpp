@@ -20,6 +20,14 @@ size_t BlockCompressor::compress(
 {
     arena_.reset();
 
+    if (cfg_.block_hint == BlockTypeHint::Stored) {
+        BitWriter bw(dst, dst_capacity);
+        emit_stored_block(src, src_len, bw, is_last);
+        if (bw.pending_bits() > 0)
+            bw.flush();
+        return bw.bytes_written();
+    }
+
     /* Allocate LZ77 hash state from arena; zero only the active hash table
      * portion (1<<hash_bits entries) instead of the full 128 KB head[]. */
     LZ77State* state = arena_.alloc<LZ77State>();

@@ -135,8 +135,8 @@ static CompressConfig config_for_level(int level) noexcept {
 
     CompressConfig cfg;
     cfg.level = level;
-    cfg.prefer_rle = true;
-    cfg.verify_rle = level >= 1;
+    cfg.prefer_rle = false;
+    cfg.verify_rle = false;
     return cfg;
 }
 

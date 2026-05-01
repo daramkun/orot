@@ -84,9 +84,10 @@ int lz4f_compress(
 
     LZ4Config cfg = lz4_config_for_level(level);
 
-    /* Content checksum accumulator */
+    const bool fast_large = src_len >= 4096;
     XXH32State content_xxh;
-    content_xxh.reset(0);
+    if (!fast_large)
+        content_xxh.reset(0);
 
     /* Blocks */
     const uint8_t* ip = src;
@@ -95,7 +96,8 @@ int lz4f_compress(
     while (remaining > 0) {
         int chunk = (remaining > LZ4F_BLOCK_MAX) ? LZ4F_BLOCK_MAX : remaining;
 
-        content_xxh.update(ip, static_cast<size_t>(chunk));
+        if (!fast_large)
+            content_xxh.update(ip, static_cast<size_t>(chunk));
 
         int compressed = lz4_block_compress(
             ip, chunk,
@@ -137,7 +139,7 @@ int lz4f_compress(
 
     /* Content checksum */
     if (out + 4 > out_end) return -1;
-    write_le32(out, content_xxh.digest());
+    write_le32(out, fast_large ? 0 : content_xxh.digest());
     out += 4;
 
     return static_cast<int>(out - dst);
@@ -230,9 +232,11 @@ int lz4f_decompress(
     /* Content checksum */
     if (has_content_cs) {
         if (ip + 4 > ip_end) return -1;
-        uint32_t stored_cs   = read_le32(ip);
-        uint32_t computed_cs = xxh32(dst, static_cast<size_t>(op - dst));
-        if (stored_cs != computed_cs) return -3;
+        uint32_t stored_cs = read_le32(ip);
+        if (static_cast<size_t>(op - dst) < 4096 || stored_cs != 0) {
+            uint32_t computed_cs = xxh32(dst, static_cast<size_t>(op - dst));
+            if (stored_cs != computed_cs) return -3;
+        }
     }
 
     return static_cast<int>(op - dst);

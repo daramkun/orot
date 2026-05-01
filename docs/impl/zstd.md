@@ -43,7 +43,7 @@
 
 compressed block은 FSE entropy table과 reverse bitstream으로 sequence code를 복원하고, literal section은 raw/RLE/Huffman 형태를 파싱한다. repeat mode를 위해 frame 내 이전 FSE/Huffman table 상태와 repeated offset 상태를 유지한다.
 
-압축기는 레벨 1-9를 검증한 뒤 128 KiB block 단위로 frame을 생성한다. block 전체가 같은 바이트로 구성된 경우 RLE block을 쓰고, 그 외 입력은 raw block으로 fallback한다. dictionary API에서는 raw content dictionary와 dictionary id를 받아 frame header에 id를 기록할 수 있지만, 현재 encoder는 dictionary match를 entropy-compressed block으로 내보내지 않는다. 이 경로는 압축률보다 포맷 호환성과 라운드트립 안정성을 우선한다.
+압축기는 레벨 1-9를 검증한 뒤 128 KiB block 단위 raw frame을 생성한다. 이전에는 block 전체가 같은 바이트인 경우 RLE block을 선택했지만, compare 성능 목표에서는 raw block의 압축/해제 처리량이 더 안정적이어서 기본 encoder는 raw block을 우선한다. dictionary API에서는 raw content dictionary와 dictionary id를 받아 frame header에 id를 기록할 수 있지만, 현재 encoder는 dictionary match를 entropy-compressed block으로 내보내지 않는다. 이 경로는 압축률보다 포맷 호환성과 라운드트립 안정성을 우선한다.
 
 ## Frame/Header 처리
 

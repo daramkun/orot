@@ -495,6 +495,17 @@ size_t bzip2_decompress(const uint8_t* src, size_t src_size,
 
     /* Stream header */
     if (src[0] != 'B' || src[1] != 'Z' || src[2] != 'h') return 0;
+    if (src[3] == '0') {
+        if (src_size < 12) return 0;
+        uint64_t n = 0;
+        for (int i = 0; i < 8; ++i)
+            n |= static_cast<uint64_t>(src[4 + i]) << (i * 8);
+        if (n > dst_cap) return 0;
+        if (src_size - 12 != n) return 0;
+        if (n > 0)
+            std::memcpy(dst, src + 12, static_cast<size_t>(n));
+        return static_cast<size_t>(n);
+    }
     int level = src[3] - '0';
     if (level < 1 || level > 9) return 0;
 

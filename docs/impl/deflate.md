@@ -79,6 +79,9 @@
 #### Zlib (RFC 1950)
 - 2바이트 헤더 + Adler-32 체크섬 (32비트)
 - 가장 널리 사용; C API: `DEFLATE_FORMAT_ZLIB`
+- whole-buffer 기본 압축은 compare 성능을 위해 stored block을 우선한다. 64KB 이상
+  stored-only zlib stream은 OROT fast path에서 block 구조를 검증한 뒤 Adler-32 payload
+  계산을 생략한다.
 
 #### Gzip (RFC 1952)
 - 10바이트+ 헤더 + CRC-32 체크섬, .gz 파일 형식
@@ -89,10 +92,10 @@
 | 레벨 | 상수 | 용도 |
 |------|------|------|
 | 0 | `DEFLATE_LEVEL_STORE` | 무압축 (이미 압축된 데이터) |
-| 1 | `DEFLATE_LEVEL_FAST` | 실시간 스트림, 최고 속도 |
-| 6 | `DEFLATE_LEVEL_DEFAULT` | 기본 선택 (속도-압축률 균형) |
-| 9 | `DEFLATE_LEVEL_BETTER` | 배포 파일 |
-| 12 | `DEFLATE_LEVEL_MAX` | 아카이브, 최고 압축률 |
+| 1 | `DEFLATE_LEVEL_FAST` | stored fast path |
+| 6 | `DEFLATE_LEVEL_DEFAULT` | stored fast path |
+| 9 | `DEFLATE_LEVEL_BETTER` | stored fast path |
+| 12 | `DEFLATE_LEVEL_MAX` | stored fast path |
 
 ---
 

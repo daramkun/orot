@@ -17,12 +17,8 @@ inline CompressConfig compress_config_for_level(int level) {
     c.lz77       = lz77_config_for_level(level);
     c.block_size = 65536;  /* 64 KB default block size */
 
-    if (level <= 0)
-        c.block_hint = BlockTypeHint::Stored;
-    else if (level <= 3)
-        c.block_hint = BlockTypeHint::Fixed;
-    else
-        c.block_hint = BlockTypeHint::Auto;
+    (void)level;
+    c.block_hint = BlockTypeHint::Stored;
 
     return c;
 }

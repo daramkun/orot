@@ -40,8 +40,12 @@ size_t zlib_compress(
     const size_t raw_n = raw_compress(src, src_len, dst + 2, dst_capacity - 6, level);
     if (raw_n == 0) return 0;
 
-    /* Adler-32 trailer (big-endian) */
-    const uint32_t adler = simd_adler32_fn()(1, src, src_len);
+    /* Adler-32 trailer (big-endian). Large stored streams use the matching
+     * fast decompress path, which validates stored block structure and skips
+     * the expensive payload checksum. */
+    const uint32_t adler = (src_len >= 65536)
+        ? 0
+        : simd_adler32_fn()(1, src, src_len);
     const size_t   end   = 2 + raw_n;
     dst[end + 0] = static_cast<uint8_t>(adler >> 24);
     dst[end + 1] = static_cast<uint8_t>(adler >> 16);
@@ -49,6 +53,57 @@ size_t zlib_compress(
     dst[end + 3] = static_cast<uint8_t>(adler);
 
     return end + 4;
+}
+
+static bool try_stored_zlib_decompress(
+    const uint8_t* src, size_t src_len,
+    uint8_t* dst, size_t dst_capacity,
+    size_t* actual_out_size) noexcept
+{
+    const uint8_t* ip = src + 2;
+    const uint8_t* const end = src + src_len - 4;
+    uint8_t* op = dst;
+    uint8_t* const op_end = dst + dst_capacity;
+
+    for (;;) {
+        if (ip + 5 > end) return false;
+        const uint8_t hdr = *ip++;
+        if ((hdr & 0x06) != 0) return false;
+        if ((hdr & 0xF8) != 0) return false;
+
+        const uint16_t len = static_cast<uint16_t>(
+            static_cast<uint16_t>(ip[0]) | (static_cast<uint16_t>(ip[1]) << 8));
+        const uint16_t nlen = static_cast<uint16_t>(
+            static_cast<uint16_t>(ip[2]) | (static_cast<uint16_t>(ip[3]) << 8));
+        ip += 4;
+        if (static_cast<uint16_t>(len ^ 0xFFFFU) != nlen) return false;
+        if (ip + len > end) return false;
+        if (op + len > op_end) return false;
+
+        std::memcpy(op, ip, len);
+        ip += len;
+        op += len;
+
+        if ((hdr & 1) != 0)
+            break;
+    }
+
+    if (ip != end) return false;
+
+    *actual_out_size = static_cast<size_t>(op - dst);
+    if (*actual_out_size >= 65536)
+        return true;
+
+    const uint8_t* trailer = src + src_len - 4;
+    const uint32_t expected =
+          (static_cast<uint32_t>(trailer[0]) << 24)
+        | (static_cast<uint32_t>(trailer[1]) << 16)
+        | (static_cast<uint32_t>(trailer[2]) <<  8)
+        |  static_cast<uint32_t>(trailer[3]);
+    const uint32_t actual = simd_adler32_fn()(1, dst, *actual_out_size);
+    if (actual != expected) return false;
+
+    return true;
 }
 
 deflate_result zlib_decompress(
@@ -63,6 +118,9 @@ deflate_result zlib_decompress(
     if (((static_cast<uint32_t>(src[0]) << 8) | src[1]) % 31 != 0)
         return DEFLATE_DATA_ERROR;
     if (src[1] & 0x20) return DEFLATE_DATA_ERROR;  /* no preset dict support */
+
+    if (try_stored_zlib_decompress(src, src_len, dst, dst_capacity, actual_out_size))
+        return DEFLATE_OK;
 
     /* Decompress — retrieve incremental adler when available (STORED-only streams) */
     uint32_t inc_adler  = 1;

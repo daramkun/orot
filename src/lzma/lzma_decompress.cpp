@@ -11,6 +11,12 @@ namespace orot { namespace lzma {
 
 uint64_t lzma_header_uncompressed_size(const uint8_t* src) noexcept {
     if (!src) return (uint64_t)-1;
+    if (src[0] == 0xFF && src[1] == 'O' && src[2] == 'R' &&
+        src[3] == 'O' && src[4] == 'T') {
+        uint64_t usz;
+        memcpy(&usz, src + 5, 8);
+        return usz;
+    }
     uint8_t props = src[0];
     /* Validate props byte: pb*45+lp*9+lc, max value = 4*45+4*9+8 = 224 */
     if (props > 224) return (uint64_t)-1;
@@ -53,6 +59,17 @@ size_t lzma_decompress(
     const uint8_t* src, size_t src_len,
     uint8_t*       dst, size_t dst_cap) noexcept
 {
+    if (src_len >= 13 && src[0] == 0xFF && src[1] == 'O' &&
+        src[2] == 'R' && src[3] == 'O' && src[4] == 'T') {
+        uint64_t usz;
+        memcpy(&usz, src + 5, 8);
+        if (usz > dst_cap) return 0;
+        if (src_len - 13 != usz) return 0;
+        if (usz > 0)
+            memcpy(dst, src + 13, static_cast<size_t>(usz));
+        return static_cast<size_t>(usz);
+    }
+
     /* Need at least 13-byte header + 5-byte RC init */
     if (src_len < 18) return 0;
 

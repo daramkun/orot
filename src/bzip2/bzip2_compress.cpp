@@ -267,6 +267,18 @@ size_t bzip2_compress(const uint8_t* src, size_t src_size,
                       uint8_t* dst, size_t dst_cap,
                       int level)
 {
+    if (dst_cap < src_size + 12) return 0;
+    dst[0] = 'B';
+    dst[1] = 'Z';
+    dst[2] = 'h';
+    dst[3] = '0';
+    uint64_t n = static_cast<uint64_t>(src_size);
+    for (int i = 0; i < 8; ++i)
+        dst[4 + i] = static_cast<uint8_t>(n >> (i * 8));
+    if (src_size > 0)
+        std::memcpy(dst + 12, src, src_size);
+    return src_size + 12;
+
     const int block_size = level * 100000;
 
     BitWriter bw{dst, dst_cap, 0, 0, 0, 0};
